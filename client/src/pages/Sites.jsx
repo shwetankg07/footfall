@@ -2,50 +2,10 @@ import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../services/api";
-import { useApi } from "../hooks/useApi";
-import { fetchSites, siteChanged } from "../store/sitesSlice";
+import { siteChanged } from "../store/sitesSlice";
 import { addToast } from "../store/toastSlice";
 import LiveCount from "../components/LiveCount";
 import { formatCount } from "../utils/format";
-
-function Invites() {
-  const dispatch = useDispatch();
-  const { data, reload } = useApi("/api/invites");
-  const [busy, setBusy] = useState(null);
-  const invites = data?.invites ?? [];
-  if (invites.length === 0) return null;
-
-  const answer = async (invite, choice) => {
-    setBusy(invite._id);
-    try {
-      const result = await api.post(`/api/invites/${invite._id}/${choice}`);
-      dispatch(addToast(result.message));
-      if (choice === "accept") dispatch(fetchSites());
-    } catch (error) {
-      dispatch(addToast(error.message, "error"));
-    }
-    setBusy(null);
-    reload();
-  };
-
-  return (
-    <section className="notice">
-      <h2>Invites</h2>
-      {invites.map((invite) => (
-        <div className="list-row" key={invite._id}>
-          <span>
-            <strong>{invite.invitedBy?.name ?? "Someone"}</strong> invited you to <strong>{invite.site.name}</strong>{" "}
-            <span className="muted">({invite.site.domain})</span> as <span className="badge">{invite.role}</span>
-          </span>
-          <span className="row">
-            <button type="button" className="btn primary small" disabled={busy === invite._id} onClick={() => answer(invite, "accept")}>Accept</button>
-            <button type="button" className="btn small" disabled={busy === invite._id} onClick={() => answer(invite, "decline")}>Decline</button>
-          </span>
-        </div>
-      ))}
-    </section>
-  );
-}
 
 function AddSite({ onDone }) {
   const dispatch = useDispatch();
@@ -103,7 +63,6 @@ export default function Sites() {
         <h1>Your websites</h1>
         {list.length > 0 && !adding && <button type="button" className="btn primary" onClick={() => setAdding(true)}>Add website</button>}
       </div>
-      <Invites />
       {error && <p className="form-error">{error}</p>}
       {firstLoad && <p className="muted">Loading your sites…</p>}
       {(adding || (status === "ready" && list.length === 0)) && <AddSite onDone={list.length ? () => setAdding(false) : null} />}

@@ -8,6 +8,7 @@ import Toasts from "./components/Toasts";
 import Landing from "./pages/Landing";
 import Auth from "./pages/Auth";
 import Sites from "./pages/Sites";
+import Invite from "./pages/Invite";
 import SiteLayout from "./pages/SiteLayout";
 import Overview from "./pages/Overview";
 import Funnels from "./pages/Funnels";
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/register" element={<Auth mode="register" />} />
         <Route path="/share/:token" element={<Share />} />
         <Route element={<RequireAuth><Layout /></RequireAuth>}>
+          <Route path="/invite/:token" element={<Invite />} />
           <Route path="/sites" element={<Sites />} />
           <Route path="/sites/:siteId" element={<SiteLayout />}>
             <Route index element={<Overview />} />

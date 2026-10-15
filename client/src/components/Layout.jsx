@@ -22,12 +22,9 @@ export default function Layout() {
       dispatch(addToast(message, "error"));
       dispatch(fetchAlerts());
     };
-    const onInvite = ({ siteName }) => dispatch(addToast(`You've been invited to ${siteName}. See it on your sites page.`));
     socket.on("alert", onAlert);
-    socket.on("invite", onInvite);
     return () => {
       socket.off("alert", onAlert);
-      socket.off("invite", onInvite);
     };
   }, [dispatch]);
 

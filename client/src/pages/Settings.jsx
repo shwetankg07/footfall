@@ -15,8 +15,9 @@ function Team({ site, reloadSite }) {
   const userId = useSelector((state) => state.auth.user._id);
   const base = `/api/sites/${site._id}`;
   const team = useApi(`${base}/members`);
-  const [email, setEmail] = useState("");
+  const [label, setLabel] = useState("");
   const [role, setRole] = useState("viewer");
+  const [createdInvite, setCreatedInvite] = useState(null);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState(null);
@@ -24,17 +25,18 @@ function Team({ site, reloadSite }) {
   const disabled = busy !== null || team.loading;
   const members = team.data?.members ?? [];
   const invites = team.data?.invites ?? [];
+  const inviteUrl = createdInvite ? `${window.location.origin}/invite/${createdInvite.token}` : "";
 
   const mutate = async (key, request, message, after) => {
     if (busy !== null) return;
     setBusy(key);
     setError("");
     try {
-      await request();
+      const result = await request();
       dispatch(addToast(message));
       setConfirmation(null);
       team.reload();
-      after?.();
+      after?.(result);
     } catch (err) {
       setError(err.message);
       dispatch(addToast(err.message, "error"));
@@ -50,8 +52,23 @@ function Team({ site, reloadSite }) {
 
   const invite = (event) => {
     event.preventDefault();
-    const address = email.trim();
-    mutate("invite", () => api.post(`${base}/invites`, { email: address, role }), `Invite added for ${address}`, () => setEmail(""));
+    mutate("invite", () => api.post(`${base}/invites`, { label: label.trim(), role }), "Invite link created", (result) => {
+      setCreatedInvite({ ...result.invite, token: result.token });
+      setLabel("");
+    });
+  };
+
+  const copyInvite = async () => {
+    if (busy !== null) return;
+    setBusy("copy");
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      dispatch(addToast("Invite link copied"));
+    } catch {
+      dispatch(addToast("Couldn't copy the invite link. Select it and copy it yourself.", "error"));
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -119,22 +136,19 @@ function Team({ site, reloadSite }) {
             {invites.map((pending) => (
               <div className="list-row" key={pending._id}>
                 <div className="row" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-                  <span>{pending.email}</span>
+                  <span>{pending.label || "Unnamed invite"}</span>
                   <span className="badge">{pending.role}</span>
-                  <span className="ink-2 small">Pending</span>
+                  <span className="ink-2 small">expires {new Date(pending.expiresAt).toLocaleDateString()}</span>
                 </div>
-                <button type="button" className="btn small" disabled={disabled} aria-label={`Cancel invite for ${pending.email}`} onClick={() => mutate(`invite-${pending._id}`, () => api.del(`${base}/invites/${pending._id}`), `Invite for ${pending.email} canceled`)}>{busy === `invite-${pending._id}` ? "Canceling…" : "Cancel invite"}</button>
+                <button type="button" className="btn small" disabled={disabled} aria-label={`Cancel invite for ${pending.label || "Unnamed invite"}`} onClick={() => mutate(`invite-${pending._id}`, () => api.del(`${base}/invites/${pending._id}`), "Invite canceled", () => {
+                  if (createdInvite?._id === pending._id) setCreatedInvite(null);
+                })}>{busy === `invite-${pending._id}` ? "Canceling…" : "Cancel"}</button>
               </div>
             ))}
           </div>
           <form className="stack" onSubmit={invite} aria-labelledby="invite-title">
-            <h3 id="invite-title">Invite a teammate</h3>
-            <p className="ink-2 small" id="invite-help">No email is sent. Your teammate can see and accept the invite after logging in to Footfall with this email address.</p>
+            <h3 id="invite-title">Invite link</h3>
             <div className="grid-2">
-              <div className="field">
-                <label htmlFor="invite-email">Email address</label>
-                <input id="invite-email" type="email" autoComplete="email" placeholder="teammate@example.com" value={email} required disabled={disabled} aria-describedby="invite-help" onChange={(event) => setEmail(event.target.value)} />
-              </div>
               <div className="field">
                 <label htmlFor="invite-role">Role</label>
                 <select id="invite-role" value={role} disabled={disabled} onChange={(event) => setRole(event.target.value)}>
@@ -142,9 +156,23 @@ function Team({ site, reloadSite }) {
                   <option value="admin">Admin</option>
                 </select>
               </div>
+              <div className="field">
+                <label htmlFor="invite-label">Who is it for? <span className="muted">(optional)</span></label>
+                <input id="invite-label" placeholder="Riya or teammate@example.com" value={label} maxLength={80} disabled={disabled} onChange={(event) => setLabel(event.target.value)} />
+              </div>
             </div>
-            <div className="row"><button type="submit" className="btn primary" disabled={disabled}>{busy === "invite" ? "Adding invite…" : "Add invite"}</button></div>
+            <div className="row"><button type="submit" className="btn primary" disabled={disabled}>{busy === "invite" ? "Creating link…" : "Create invite link"}</button></div>
           </form>
+          {createdInvite && (
+            <div className="stack">
+              <div className="field">
+                <label htmlFor="invite-link">Invite link</label>
+                <input id="invite-link" value={inviteUrl} readOnly onFocus={(event) => event.target.select()} aria-describedby="invite-help" />
+              </div>
+              <div className="row"><button type="button" className="btn" disabled={disabled} onClick={copyInvite}>{busy === "copy" ? "Copying…" : "Copy"}</button></div>
+              <p className="ink-2 small" id="invite-help">Send this link to your teammate. It works once, for one person, as {createdInvite.role}, and expires in 7 days. Anyone who has it can join, so share it privately.</p>
+            </div>
+          )}
         </>
       )}
       {site.role !== "owner" && (
