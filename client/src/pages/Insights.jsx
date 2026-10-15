@@ -37,8 +37,8 @@ export default function Insights() {
           <h2>Page views per hour, last 7 days</h2>
           <div className="legend">
             <span className="key"><span className="key-line" />Page views</span>
-            <span className="key"><span className="key-band" />Normal range (forecast)</span>
-            <span className="key"><span className="key-dot" />Alert</span>
+            {band.length > 0 && <span className="key"><span className="key-band" />Normal range (forecast)</span>}
+            {anomalies.length > 0 && <span className="key"><span className="key-dot" />Alert</span>}
           </div>
         </div>
         {stats.error && <p className="form-error">{stats.error.message}</p>}
