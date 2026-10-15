@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import User from "../models/user.model.js";
 import { filled, isEmail } from "../utils/validate.js";
-import { generateToken, cookieOptions } from "../utils/generateToken.js";
+import { generateToken, generateSocketToken, cookieOptions } from "../utils/generateToken.js";
 
 const publicUser = (user) => ({ _id: user._id, name: user.name, email: user.email });
 
@@ -52,6 +52,10 @@ export const login = async (req, res) => {
 
 export const me = (req, res) => {
   res.json({ user: publicUser(req.user) });
+};
+
+export const socketToken = (req, res) => {
+  res.json({ token: generateSocketToken(req.user._id) });
 };
 
 export const logout = (req, res) => {

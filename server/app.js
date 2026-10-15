@@ -1,7 +1,7 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import path from "node:path";
 import authRoutes from "./routes/auth.routes.js";
 import siteRoutes from "./routes/site.routes.js";
@@ -20,8 +20,12 @@ export const allowedOrigins = process.env.CLIENT_URL.split(",").map((origin) => 
 // Render sits one proxy hop in front of us; without this req.ip is the proxy.
 app.set("trust proxy", 1);
 
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
-  message: { message: "Too many attempts, try again in a few minutes" } });
+// Keyed by email when there is one: behind the Vercel rewrite, many people share one IP.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: (req) => (typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : ipKeyGenerator(req.ip)),
+  message: { message: "Too many attempts, try again in a few minutes" },
+});
 
 const collectLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false });
 
@@ -35,7 +39,7 @@ app.get("/t.js", (req, res) => {
 app.post("/e", collectLimiter, express.text({ type: "*/*", limit: "4kb" }), collect);
 
 app.use("/api", cors({ origin: allowedOrigins, credentials: true }), express.json({ limit: "20kb" }), cookieParser());
-app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/auth", (req, res, next) => (req.method === "POST" ? authLimiter(req, res, next) : next()), authRoutes);
 app.use("/api/sites", siteRoutes);
 app.use("/api/invites", inviteRoutes);
 app.use("/api/share", shareRoutes);

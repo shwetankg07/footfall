@@ -10,12 +10,17 @@ let io = null;
 export const emitToSite = (siteId, event, data) => io?.to(`site:${siteId}`).emit(event, data);
 export const emitToUser = (userId, event, data) => io?.to(`user:${userId}`).emit(event, data);
 
-const tokenFromCookie = (header = "") => {
-  const pair = header.split(";").map((part) => part.trim()).find((part) => part.startsWith("token="));
-  return pair ? decodeURIComponent(pair.slice("token=".length)) : null;
+// After access to a site changes (share link rotated, member removed, site deleted),
+// everyone watching it has to prove access again.
+export const resetWatchers = (siteId) => {
+  if (!io) return;
+  const room = `site:${siteId}`;
+  io.to(room).emit("rewatch");
+  io.in(room).socketsLeave(room);
 };
 
-const siteForWatcher = async (user, { siteId, shareToken } = {}) => {
+const siteForWatcher = async (user, payload) => {
+  const { siteId, shareToken } = payload ?? {};
   if (typeof shareToken === "string" && shareToken) {
     return Site.findOne({ shareToken });
   }
@@ -25,12 +30,17 @@ const siteForWatcher = async (user, { siteId, shareToken } = {}) => {
 };
 
 export const initSocket = (server, origins) => {
-  io = new Server(server, { cors: { origin: origins, credentials: true } });
+  io = new Server(server, { cors: { origin: origins } });
 
-  // Logged-out sockets are allowed: people opening a public share link watch the live count too.
-  io.use(async (socket, next) => {
-    socket.data.user = await userFromToken(tokenFromCookie(socket.handshake.headers.cookie));
-    next();
+  // Signed-in dashboards send a 2-minute token from GET /api/auth/socket-token.
+  // Without one the socket is anonymous, which is enough for public share links.
+  io.use((socket, next) => {
+    userFromToken(socket.handshake.auth?.token, "socket")
+      .then((user) => {
+        socket.data.user = user;
+        next();
+      })
+      .catch(() => next());
   });
 
   io.on("connection", (socket) => {
@@ -39,17 +49,18 @@ export const initSocket = (server, origins) => {
 
     // A dashboard tab watches one site at a time.
     socket.on("watch", async (payload, ack) => {
+      const reply = typeof ack === "function" ? ack : () => {};
       try {
         const site = await siteForWatcher(user, payload);
-        if (!site) return ack?.({ ok: false });
+        if (!site) return reply({ ok: false });
         for (const room of socket.rooms) {
           if (room.startsWith("site:")) socket.leave(room);
         }
         socket.join(`site:${site._id}`);
-        ack?.({ ok: true, live: liveCount(site._id) });
+        reply({ ok: true, live: liveCount(site._id) });
       } catch (error) {
         console.error(error);
-        ack?.({ ok: false });
+        reply({ ok: false });
       }
     });
   });

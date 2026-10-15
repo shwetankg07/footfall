@@ -1,3 +1,6 @@
+// The API's own address, used for the socket and the tracker snippet. Dashboard requests
+// instead go to /api on this same origin (Vite proxy in dev, Vercel rewrite in production),
+// which keeps the login cookie first-party.
 export const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8080").replace(/\/$/, "");
 
 export class ApiError extends Error {
@@ -10,7 +13,7 @@ export class ApiError extends Error {
 const request = async (method, path, body) => {
   let res;
   try {
-    res = await fetch(API_URL + path, {
+    res = await fetch(path, {
       method,
       credentials: "include",
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },

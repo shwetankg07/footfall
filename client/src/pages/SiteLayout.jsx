@@ -20,10 +20,13 @@ export default function SiteLayout() {
 
     if (socket.connected) watch();
     socket.on("connect", watch);
+    // Sent when access to the site changes; prove access again.
+    socket.on("rewatch", watch);
     socket.on("live", onLive);
     socket.on("installed", onInstalled);
     return () => {
       socket.off("connect", watch);
+      socket.off("rewatch", watch);
       socket.off("live", onLive);
       socket.off("installed", onInstalled);
     };

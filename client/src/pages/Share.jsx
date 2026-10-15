@@ -19,9 +19,12 @@ export default function Share() {
     const onLive = (msg) => setLive(msg.count);
     if (socket.connected) watch();
     socket.on("connect", watch);
+    // Sent when access to the site changes; prove access again.
+    socket.on("rewatch", watch);
     socket.on("live", onLive);
     return () => {
       socket.off("connect", watch);
+      socket.off("rewatch", watch);
       socket.off("live", onLive);
     };
   }, [token]);
