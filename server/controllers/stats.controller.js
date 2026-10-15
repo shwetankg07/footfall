@@ -10,7 +10,7 @@ export const statsFor = async (site, query) => {
   const range = parseRange(query);
   if (range.error) return range;
 
-  const key = `${site._id}|${range.from.toISOString()}|${range.to.toISOString()}`;
+  const key = `${site._id}|${range.from.toISOString()}|${range.to.toISOString()}|${range.unit}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.stats;
 

@@ -15,5 +15,7 @@ export const parseRange = (query) => {
   if (to - from > MAX_DAYS * DAY_MS) {
     return { error: `Pick a range of ${MAX_DAYS} days or less` };
   }
-  return { from, to, unit: to - from <= 2 * DAY_MS ? "hour" : "day" };
+  // Hourly buckets by default up to 2 days; callers can ask for hourly up to 14 (the forecast view does).
+  const hourly = to - from <= 2 * DAY_MS || (query.unit === "hour" && to - from <= 14 * DAY_MS);
+  return { from, to, unit: hourly ? "hour" : "day" };
 };
