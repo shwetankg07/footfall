@@ -2,17 +2,20 @@ import crypto from "node:crypto";
 import Site from "../models/site.model.js";
 import { statsFor } from "./stats.controller.js";
 import { liveCount } from "../utils/live.js";
+import { resetWatchers } from "../socket.js";
 
 // Creating a link again replaces the old one, so a leaked link can be killed.
 export const enableShare = async (req, res) => {
   req.site.shareToken = crypto.randomBytes(18).toString("base64url");
   await req.site.save();
+  resetWatchers(req.site._id);
   res.json({ shareToken: req.site.shareToken });
 };
 
 export const disableShare = async (req, res) => {
   req.site.shareToken = null;
   await req.site.save();
+  resetWatchers(req.site._id);
   res.json({ message: "Public link turned off" });
 };
 

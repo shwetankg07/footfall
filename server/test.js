@@ -75,10 +75,18 @@ try {
   assert.equal((await call("GET", `/api/sites/${siteId}`, { cookie: eve })).status, 404, "strangers can't see a site");
   assert.equal((await call("GET", "/api/sites/not-an-id", { cookie: asha })).status, 404);
 
-  // Live count over the socket, before any traffic arrives
-  const socket = io(BASE, { extraHeaders: { Cookie: asha }, transports: ["websocket"] });
-  const watched = await new Promise((resolve) => socket.on("connect", () => socket.emit("watch", { siteId }, resolve)));
+  // Live count over the socket, before any traffic arrives. Sockets log in with a 2-minute token, not the cookie.
+  const { token: socketToken } = (await call("GET", "/api/auth/socket-token", { cookie: asha })).body;
+  assert.equal((await call("GET", "/api/auth/me", { cookie: `token=${socketToken}` })).status, 401, "a socket token is not a login");
+  assert.equal((await call("GET", "/api/auth/socket-token")).status, 401);
+  const socket = io(BASE, { auth: { token: socketToken }, transports: ["websocket"] });
+  await new Promise((resolve) => socket.on("connect", resolve));
+  socket.emit("watch", {}, "not-a-function");
+  socket.emit("watch", null);
+  const watched = await new Promise((resolve) => socket.emit("watch", { siteId }, resolve));
   assert.deepEqual(watched, { ok: true, live: 0 });
+  const stranger = io(BASE, { auth: { token: "garbage" }, transports: ["websocket"] });
+  assert.deepEqual(await new Promise((resolve) => stranger.on("connect", () => stranger.emit("watch", { siteId }, resolve))), { ok: false }, "no token, no private site");
   const installed = new Promise((resolve) => socket.once("installed", resolve));
   const liveUpdate = new Promise((resolve) => socket.once("live", resolve));
 
@@ -159,7 +167,12 @@ try {
   assert.equal(res.status, 200);
   assert.equal(res.body.summary.pageviews, 3);
   assert.equal((await call("GET", `/api/share/${token}`)).body.site.domain, "shop.example.com");
+  const viaLink = await new Promise((resolve) => stranger.emit("watch", { shareToken: token }, resolve));
+  assert.equal(viaLink.ok, true, "share links can watch the live count");
+  const rewatch = new Promise((resolve) => stranger.once("rewatch", resolve));
   await call("DELETE", `/api/sites/${siteId}/share`, { cookie: asha });
+  await rewatch;
+  assert.equal((await new Promise((resolve) => stranger.emit("watch", { shareToken: token }, resolve))).ok, false, "turned-off links lose the live feed");
   assert.equal((await call("GET", `/api/share/${token}/stats`)).status, 404, "turned-off links stop working");
 
   // Forecast band and alerts from the ML job
@@ -171,7 +184,7 @@ try {
   await Alert.create({ site: siteId, hour, kind: "spike", actual: 38, expected: 11, lo: 4, hi: 17, score: 1e-9, model: "test" });
   const alertEvent = new Promise((resolve) => socket.once("alert", resolve));
   assert.equal((await call("POST", "/internal/alerts/flush", { headers: { "x-internal-secret": "wrong" } })).status, 401);
-  assert.equal((await call("POST", "/internal/alerts/flush", { headers: { "x-internal-secret": SECRET } })).body.notified, 1);
+  assert.deepEqual((await call("POST", "/internal/alerts/flush", { headers: { "x-internal-secret": SECRET } })).body, { notified: 1, emailed: 0 });
   assert.equal((await call("POST", "/internal/alerts/flush", { headers: { "x-internal-secret": SECRET } })).body.notified, 0, "flush is idempotent");
   assert.match((await alertEvent).message, /Traffic spike on shop\.example\.com: 38 page views/);
   res = await call("GET", "/api/alerts", { cookie: bob });
@@ -190,6 +203,7 @@ try {
   assert.equal(await Alert.countDocuments(), 0);
 
   socket.close();
+  stranger.close();
   console.log("All server tests passed");
 } catch (error) {
   console.error(error);

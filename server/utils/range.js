@@ -3,7 +3,7 @@ const MAX_DAYS = 366;
 
 // ?from=ISO&to=ISO, defaulting to the last 7 days. Returns { error } for bad input.
 export const parseRange = (query) => {
-  const to = query.to ? new Date(query.to) : new Date();
+  const to = query.to ? new Date(query.to) : new Date(Math.ceil(Date.now() / 60000) * 60000);
   const from = query.from ? new Date(query.from) : new Date(to.getTime() - 7 * DAY_MS);
 
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {

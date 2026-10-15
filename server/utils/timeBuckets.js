@@ -1,4 +1,5 @@
 // Bucket starts in a site's timezone, so "Tuesday 9pm" means 9pm where the site owner lives.
+// They have to land exactly where MongoDB's $dateTrunc (with the same timezone) puts them.
 
 const offsetMinutes = (timeZone, date) => {
   const name = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" })
@@ -10,20 +11,35 @@ const offsetMinutes = (timeZone, date) => {
   return match[1] === "-" ? -minutes : minutes;
 };
 
-const UNIT_MS = { hour: 60 * 60 * 1000, day: 24 * 60 * 60 * 1000 };
+const localParts = (date, timeZone) =>
+  Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric" })
+      .formatToParts(date)
+      .map((part) => [part.type, Number(part.value)])
+  );
+
+// Wall-clock time in a zone -> UTC instant. The second pass fixes the offset when a DST change sits in between.
+const zonedToUtc = (year, month, day, hour, timeZone) => {
+  const wall = Date.UTC(year, month - 1, day, hour);
+  const first = wall - offsetMinutes(timeZone, new Date(wall)) * 60000;
+  return new Date(wall - offsetMinutes(timeZone, new Date(first)) * 60000);
+};
+
+const HOUR_MS = 60 * 60 * 1000;
 
 export const truncate = (date, unit, timeZone) => {
-  const offset = offsetMinutes(timeZone, date) * 60 * 1000;
-  const local = date.getTime() + offset;
-  return new Date(local - (((local % UNIT_MS[unit]) + UNIT_MS[unit]) % UNIT_MS[unit]) - offset);
+  const p = localParts(date, timeZone);
+  return zonedToUtc(p.year, p.month, p.day, unit === "hour" ? p.hour : 0, timeZone);
 };
 
 // Every bucket start from `from` up to (not including) `to`.
-// ponytail: steps by fixed 1h/24h, so a DST change shifts daily buckets by an hour; fine for IST, revisit for DST zones.
+// Hours step by 60 minutes; days step to the next local midnight, so 23- and 25-hour DST days come out right.
 export const bucketStarts = (from, to, unit, timeZone) => {
   const starts = [];
-  for (let t = truncate(from, unit, timeZone).getTime(); t < to.getTime(); t += UNIT_MS[unit]) {
-    starts.push(new Date(t));
+  let t = truncate(from, unit, timeZone);
+  while (t < to) {
+    starts.push(t);
+    t = unit === "hour" ? new Date(t.getTime() + HOUR_MS) : truncate(new Date(t.getTime() + 27 * HOUR_MS), "day", timeZone);
   }
   return starts;
 };

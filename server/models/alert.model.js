@@ -15,6 +15,8 @@ const alertSchema = new mongoose.Schema(
     model: String,
     createdAt: { type: Date, default: Date.now },
     notifiedAt: { type: Date, default: null },
+    emailedAt: { type: Date, default: null },
+    emailAttempts: { type: Number, default: 0 },
     readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   },
   { versionKey: false }

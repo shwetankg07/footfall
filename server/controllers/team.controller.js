@@ -4,7 +4,7 @@ import User from "../models/user.model.js";
 import Invite from "../models/invite.model.js";
 import { isEmail } from "../utils/validate.js";
 import { publicSite } from "./site.controller.js";
-import { emitToUser } from "../socket.js";
+import { emitToUser, resetWatchers } from "../socket.js";
 
 const ROLES = ["admin", "viewer"];
 
@@ -64,11 +64,11 @@ export const changeRole = async (req, res) => {
     return res.status(400).json({ message: "Role must be admin or viewer" });
   }
 
-  const member = req.site.members.find((m) => m.user.equals(req.params.userId));
-  if (!member) return res.status(404).json({ message: "That person isn't a member of this site" });
-
-  member.role = role;
-  await req.site.save();
+  // Targeted update, so it can't overwrite someone who joined in the meantime.
+  const result = mongoose.isValidObjectId(req.params.userId)
+    ? await Site.updateOne({ _id: req.site._id, "members.user": req.params.userId }, { $set: { "members.$.role": role } })
+    : { matchedCount: 0 };
+  if (result.matchedCount === 0) return res.status(404).json({ message: "That person isn't a member of this site" });
   res.json({ message: `Role changed to ${role}` });
 };
 
@@ -84,13 +84,14 @@ export const removeMember = async (req, res) => {
     return res.status(403).json({ message: "Only admins can do that" });
   }
 
-  const before = req.site.members.length;
-  req.site.members = req.site.members.filter((m) => !m.user.equals(userId));
-  if (req.site.members.length === before) {
+  const result = mongoose.isValidObjectId(userId)
+    ? await Site.updateOne({ _id: req.site._id }, { $pull: { members: { user: userId } } })
+    : { modifiedCount: 0 };
+  if (result.modifiedCount === 0) {
     return res.status(404).json({ message: "That person isn't a member of this site" });
   }
 
-  await req.site.save();
+  resetWatchers(req.site._id);
   res.json({ message: leaving ? "You left the site" : "Member removed" });
 };
 

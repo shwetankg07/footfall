@@ -65,37 +65,55 @@ const secretOk = (given) => {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 };
 
-// Called by the hourly ML job after it writes new alerts. Safe to call any number of times.
+const MAX_EMAIL_ATTEMPTS = 3;
+
+const emailAlert = async (alert) => {
+  const site = await Site.findById(alert.site).populate("owner", "email").populate("members.user", "email");
+  if (!site) return true;
+  const people = [site.owner, ...site.members.map((m) => m.user)].filter(Boolean);
+  const to = people.filter((person) => ["owner", "admin"].includes(roleOf(site, person._id))).map((person) => person.email);
+  return sendEmail({
+    to,
+    subject: `${alert.kind === "spike" ? "Traffic spike" : "Traffic drop"} on ${site.domain}`,
+    html: `<p>${escapeHtml(describeAlert(alert, site))}</p><p>Open your Footfall dashboard to see what changed.</p>`,
+  });
+};
+
+// Called by the hourly ML job after it writes new alerts. Safe to call any number of times:
+// in-app notifications go out once, emails are retried up to three times.
 export const flushAlerts = async (req, res) => {
   if (!secretOk(req.get("x-internal-secret"))) {
     return res.status(401).json({ message: "Bad internal secret" });
   }
 
-  const pending = await Alert.find({ notifiedAt: null }).sort({ hour: 1 }).limit(100);
   let notified = 0;
-
-  for (const alert of pending) {
+  for (const alert of await Alert.find({ notifiedAt: null }).sort({ hour: 1 }).limit(100)) {
     // Claim it first, so two overlapping calls never notify twice.
     const claim = await Alert.updateOne({ _id: alert._id, notifiedAt: null }, { notifiedAt: new Date() });
     if (claim.modifiedCount === 0) continue;
 
-    const site = await Site.findById(alert.site).populate("owner", "email").populate("members.user", "email");
+    const site = await Site.findById(alert.site).select("owner members domain timezone");
     if (!site) continue;
-
     const message = describeAlert(alert, site);
-    const people = [site.owner, ...site.members.map((m) => m.user)].filter(Boolean);
-    for (const person of people) {
-      emitToUser(person._id, "alert", { siteId: String(site._id), message });
+    for (const userId of [site.owner, ...site.members.map((m) => m.user)]) {
+      emitToUser(userId, "alert", { siteId: String(site._id), message });
     }
-
-    const emailTo = people.filter((person) => ["owner", "admin"].includes(roleOf(site, person._id))).map((p) => p.email);
-    await sendEmail({
-      to: emailTo,
-      subject: `${alert.kind === "spike" ? "Traffic spike" : "Traffic drop"} on ${site.domain}`,
-      html: `<p>${escapeHtml(message)}</p><p>Open your Footfall dashboard to see what changed.</p>`,
-    });
     notified += 1;
   }
 
-  res.json({ notified });
+  let emailed = 0;
+  if (process.env.RESEND_API_KEY) {
+    const due = await Alert.find({ notifiedAt: { $ne: null }, emailedAt: null, emailAttempts: { $not: { $gte: MAX_EMAIL_ATTEMPTS } } }).limit(50).lean();
+    for (const alert of due) {
+      // lean() keeps a missing field missing; null matches alerts the ML job wrote without it.
+      const claim = await Alert.updateOne({ _id: alert._id, emailedAt: null, emailAttempts: alert.emailAttempts ?? null }, { $inc: { emailAttempts: 1 } });
+      if (claim.modifiedCount === 0) continue;
+      if (await emailAlert(alert)) {
+        await Alert.updateOne({ _id: alert._id }, { emailedAt: new Date() });
+        emailed += 1;
+      }
+    }
+  }
+
+  res.json({ notified, emailed });
 };

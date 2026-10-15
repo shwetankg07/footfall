@@ -10,6 +10,8 @@ export const siteByDomain = async (domain) => {
 
   const site = await Site.findOne({ domain }).select("_id domain firstEventAt").lean();
   cache.set(domain, { site, at: Date.now() });
+  // Unknown domains are cached too (so spam can't hammer the database), but the map stays bounded.
+  if (cache.size > 1000) cache.delete(cache.keys().next().value);
   return site;
 };
 

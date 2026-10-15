@@ -68,7 +68,7 @@ export const getFunnelResult = async (req, res) => {
   // move the walk into $setWindowFields if a site ever has millions.
   const visitors = await Event.aggregate([
     { $match: { site: req.site._id, ts: { $gte: range.from, $lt: range.to }, $or: funnel.steps.map(stepFilter) } },
-    { $sort: { ts: 1 } },
+    { $sort: { ts: 1, _id: 1 } },
     { $group: { _id: "$visitor", events: { $push: { name: "$name", path: "$path" } } } },
   ]).allowDiskUse(true);
 

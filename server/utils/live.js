@@ -15,11 +15,14 @@ const prune = (siteId, visitors, now) => {
   if (visitors.size === 0) sites.delete(siteId);
 };
 
+// Counts without pruning: pruning is the timer's job, because it also broadcasts the drop.
 export const liveCount = (siteId) => {
   const visitors = sites.get(String(siteId));
   if (!visitors) return 0;
-  prune(String(siteId), visitors, Date.now());
-  return visitors.size;
+  const cutoff = Date.now() - WINDOW_MS;
+  let count = 0;
+  for (const seen of visitors.values()) if (seen >= cutoff) count += 1;
+  return count;
 };
 
 export const touch = (siteId, visitor) => {

@@ -9,6 +9,7 @@ import { normalizeDomain } from "../utils/domain.js";
 import { forgetDomain } from "../utils/siteCache.js";
 import { liveCount, forget } from "../utils/live.js";
 import { roleOf } from "../middlewares/site.middleware.js";
+import { resetWatchers } from "../socket.js";
 
 const TIMEZONES = new Set(Intl.supportedValuesOf("timeZone"));
 
@@ -94,5 +95,6 @@ export const deleteSite = async (req, res) => {
   await site.deleteOne();
   forgetDomain(site.domain);
   forget(site._id);
+  resetWatchers(site._id);
   res.json({ message: `${site.domain} and all its data were deleted` });
 };
