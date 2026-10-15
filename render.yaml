@@ -5,6 +5,8 @@ services:
     name: footfall-api
     runtime: node
     plan: free
+    # Closest Render region to India.
+    region: singapore
     rootDir: server
     buildCommand: npm ci --omit=dev
     startCommand: npm start
