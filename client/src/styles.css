@@ -125,6 +125,7 @@ code, pre, .mono { font-family: var(--mono); }
   display: grid;
   gap: 14px;
   min-width: 0;
+  align-content: start;
 }
 .card-head {
   display: flex;

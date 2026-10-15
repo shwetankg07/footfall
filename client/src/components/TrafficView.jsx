@@ -80,13 +80,13 @@ export default function TrafficView({ apiBase, timezone, forecastPath, before })
             )}
           </section>
           <div className="grid-2">
-            <Breakdown title="Top pages" rows={data.pages} labelKey="path" />
-            <Breakdown title="Sources" rows={data.referrers} labelKey="referrer" format={(v) => v ?? "Direct or unknown"} />
-            <Breakdown title="Devices" rows={data.devices} labelKey="device" format={(v) => v[0].toUpperCase() + v.slice(1)} />
-            <Breakdown title="Browsers" rows={data.browsers} labelKey="browser" />
-            <Breakdown title="Countries" rows={data.countries} labelKey="country" format={countryName} emptyLabel="No country data yet" />
+            <Breakdown title="Top pages" itemLabel="Page" rows={data.pages} labelKey="path" />
+            <Breakdown title="Sources" itemLabel="Source" rows={data.referrers} labelKey="referrer" format={(v) => v ?? "Direct or unknown"} />
+            <Breakdown title="Devices" itemLabel="Device" rows={data.devices} labelKey="device" format={(v) => v[0].toUpperCase() + v.slice(1)} />
+            <Breakdown title="Browsers" itemLabel="Browser" rows={data.browsers} labelKey="browser" />
+            <Breakdown title="Countries" itemLabel="Country" rows={data.countries} labelKey="country" format={countryName} emptyLabel="No country data yet" />
             <Breakdown
-              title="Custom events"
+              title="Custom events" itemLabel="Event"
               rows={data.events}
               labelKey="name"
               valueKey="count"

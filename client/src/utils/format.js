@@ -14,8 +14,11 @@ export const formatTime = (date, unit, timeZone, withDay = false) => {
   return new Intl.DateTimeFormat("en-IN", options).format(new Date(date));
 };
 
-export const formatDateTime = (date, timeZone) =>
-  new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone }).format(new Date(date));
+export const formatDateTime = (date, timeZone, unit = "hour") =>
+  new Intl.DateTimeFormat("en-IN", {
+    weekday: "short", day: "numeric", month: "short", timeZone,
+    ...(unit === "hour" && { hour: "numeric", minute: "2-digit" }),
+  }).format(new Date(date));
 
 export const timeAgo = (date) => {
   const seconds = Math.round((Date.now() - new Date(date).getTime()) / 1000);

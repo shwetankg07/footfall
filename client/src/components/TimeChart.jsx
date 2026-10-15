@@ -79,7 +79,7 @@ export default function TimeChart({ points, band = [], anomalies = [], unit, tim
   const lastMeasured = measured[measured.length - 1];
   const runsIntoFuture = lastMeasured && banded.some((d) => d.t > lastMeasured.t);
 
-  const tickCount = Math.min(timeline.length, width < 500 ? 4 : 7);
+  const tickCount = timeline.length <= (width < 500 ? 4 : 8) ? timeline.length : width < 500 ? 4 : 7;
   const xTicks = Array.from({ length: tickCount }, (_, i) => timeline[Math.round((i * (timeline.length - 1)) / Math.max(1, tickCount - 1))]);
   const fmtTick = tickFormat ?? ((t) => formatTime(t, unit, timezone));
 
@@ -165,7 +165,7 @@ export default function TimeChart({ points, band = [], anomalies = [], unit, tim
             </span>
           )}
           {current.anomaly && <span style={{ color: "var(--critical-ink)" }}>! Unusual {current.anomaly.kind}</span>}
-          <span className="muted">{formatDateTime(current.t, timezone)}</span>
+          <span className="muted">{formatDateTime(current.t, timezone, unit)}</span>
         </div>
       )}
 
@@ -183,7 +183,7 @@ export default function TimeChart({ points, band = [], anomalies = [], unit, tim
             <tbody>
               {timeline.map((d) => (
                 <tr key={d.t.getTime()}>
-                  <td>{formatDateTime(d.t, timezone)}</td>
+                  <td>{formatDateTime(d.t, timezone, unit)}</td>
                   <td className="num">{d.value === undefined ? "–" : formatCount(d.value)}</td>
                   {banded.length > 0 && <td className="num">{d.band ? `${Math.round(d.band.lo)}–${Math.round(d.band.hi)}` : "–"}</td>}
                 </tr>

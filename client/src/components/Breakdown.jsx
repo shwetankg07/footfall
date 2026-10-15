@@ -1,7 +1,7 @@
 import { formatCount } from "../utils/format";
 
 // A ranked list where each row's wash is its share of the top row.
-export default function Breakdown({ title, rows, labelKey, emptyLabel = "Nothing yet", format = (v) => v ?? "Unknown", valueKey = "visitors", valueLabel = "Visitors" }) {
+export default function Breakdown({ title, itemLabel, rows, labelKey, emptyLabel = "Nothing yet", format = (v) => v ?? "Unknown", valueKey = "visitors", valueLabel = "Visitors" }) {
   const max = Math.max(1, ...rows.map((row) => row[valueKey]));
   return (
     <section className="card">
@@ -11,7 +11,7 @@ export default function Breakdown({ title, rows, labelKey, emptyLabel = "Nothing
       ) : (
         <div className="breakdown">
           <div className="breakdown-head">
-            <span>{title}</span>
+            <span>{itemLabel}</span>
             <span>{valueLabel}</span>
           </div>
           {rows.map((row, i) => (
