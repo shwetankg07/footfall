@@ -20,7 +20,7 @@ Dependencies are pinned in `requirements.txt`; the local environment is gitignor
 ```bash
 export MONGO_URI='mongodb://localhost:27017'
 export MONGO_DB='footfall'
-export API_URL='http://localhost:3000'
+export API_URL='http://localhost:8080'
 export INTERNAL_SECRET='use-the-same-secret-as-the-server'
 
 python -m footfall_ml.score --dry-run
