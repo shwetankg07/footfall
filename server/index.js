@@ -2,10 +2,12 @@ import "dotenv/config";
 import "./config/env.js";
 import http from "node:http";
 import mongoose from "mongoose";
-import app from "./app.js";
+import app, { allowedOrigins } from "./app.js";
+import { initSocket } from "./socket.js";
 
 const PORT = process.env.PORT || 8080;
 const server = http.createServer(app);
+initSocket(server, allowedOrigins);
 
 mongoose
   .connect(process.env.MONGO_URI, { dbName: process.env.MONGO_DB || "footfall" })
