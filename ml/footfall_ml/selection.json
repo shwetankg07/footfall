@@ -1,0 +1,13 @@
+{
+  "model": "seasonal_profile",
+  "criterion": "highest macro F1 across traffic levels; tie-break lower MASE",
+  "seeds": [
+    7,
+    19,
+    41
+  ],
+  "days": 35,
+  "warmup_days": 21,
+  "macro_f1": 0.731450719822813,
+  "macro_mase": 0.9692044433305512
+}
