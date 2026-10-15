@@ -1,0 +1,33 @@
+# Render blueprint for the API. The dashboard (client/) deploys to Vercel and the
+# ML job runs on GitHub Actions, so this is the only Render service.
+services:
+  - type: web
+    name: footfall-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Production turns on SameSite=None; Secure cookies, which the dashboard needs
+      # because it lives on a different domain.
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_DB
+        value: footfall
+      - key: JWT_SECRET
+        generateValue: true
+      - key: INTERNAL_SECRET
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      # Exact dashboard origin, no trailing slash, e.g. https://footfall.vercel.app
+      - key: CLIENT_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: ALERT_FROM_EMAIL
+        value: Footfall <onboarding@resend.dev>

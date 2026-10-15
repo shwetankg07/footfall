@@ -1,0 +1,15 @@
+# Render's free tier sleeps after 15 idle minutes, and page views sent while it
+# wakes up (about a minute) are lost. A ping every 10 minutes keeps it up.
+name: keep-api-awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: ${{ vars.API_URL != '' }}
+    steps:
+      - run: curl --fail --silent --show-error --max-time 90 "${{ vars.API_URL }}/health"
