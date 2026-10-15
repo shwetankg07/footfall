@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { protect } from "../middlewares/auth.middleware.js";
-import { myInvites, acceptInvite, declineInvite } from "../controllers/team.controller.js";
+import { previewInvite, acceptInvite, declineInvite } from "../controllers/team.controller.js";
 
 const router = Router();
 
 router.use(protect);
-router.get("/", myInvites);
-router.post("/:inviteId/accept", acceptInvite);
-router.post("/:inviteId/decline", declineInvite);
+router.get("/:token", previewInvite);
+router.post("/:token/accept", acceptInvite);
+router.post("/:token/decline", declineInvite);
 
 export default router;

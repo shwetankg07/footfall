@@ -1,12 +1,15 @@
 // End-to-end: starts the real server against an in-memory MongoDB and walks every workflow.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { io } from "socket.io-client";
 import Event from "./models/event.model.js";
 import Alert from "./models/alert.model.js";
 import Forecast from "./models/forecast.model.js";
+import Invite from "./models/invite.model.js";
+import Site from "./models/site.model.js";
 
 const PORT = 8098;
 const BASE = `http://localhost:${PORT}`;
@@ -137,28 +140,147 @@ try {
   res = await call("GET", `/api/sites/${siteId}/funnels/${funnelId}`, { cookie: asha });
   assert.deepEqual(res.body.steps.map((s) => [s.visitors, s.kept]), [[2, null], [1, 50], [1, 100]]);
 
-  // Team: invite, accept, roles
-  assert.equal((await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { email: "asha@example.com", role: "viewer" } })).status, 409);
-  assert.equal((await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { email: "bob@example.com", role: "owner" } })).status, 400);
-  res = await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { email: "BOB@example.com", role: "viewer" } });
+  // Team: single-use invite links, accept, roles
+  const invalidInvite = "This invite link is invalid, expired or already used";
+  assert.equal((await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { role: "owner" } })).status, 400);
+  for (const label of [null, 123, {}, [], "x".repeat(81)]) {
+    assert.equal((await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { role: "viewer", label } })).status, 400);
+  }
+  res = await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { label: "  eve@example.com  ", role: "viewer" } });
   assert.equal(res.status, 201);
-  assert.equal((await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { email: "bob@example.com", role: "viewer" } })).status, 409);
-  res = await call("GET", "/api/invites", { cookie: bob });
+  const { token: inviteToken, invite: createdInvite } = res.body;
+  const inviteId = createdInvite._id;
+  assert.match(inviteToken, /^[A-Za-z0-9_-]{32}$/);
+  assert.deepEqual(Object.keys(createdInvite).sort(), ["_id", "createdAt", "expiresAt", "label", "role"]);
+  assert.equal(createdInvite.label, "eve@example.com");
+  assert.equal(new Date(createdInvite.expiresAt) - new Date(createdInvite.createdAt), 7 * 24 * 60 * 60 * 1000);
+  const storedInvite = await Invite.findById(inviteId).lean();
+  assert.equal(storedInvite.tokenHash, createHash("sha256").update(inviteToken).digest("hex"));
+  assert.equal(storedInvite.token, undefined, "the raw token is never stored");
+  assert.equal(storedInvite.email, undefined);
+
+  res = await call("GET", `/api/sites/${siteId}/members`, { cookie: asha });
   assert.equal(res.body.invites.length, 1);
-  const inviteId = res.body.invites[0]._id;
-  assert.equal((await call("POST", `/api/invites/${inviteId}/accept`, { cookie: eve })).status, 404, "only the invitee can accept");
-  assert.equal((await call("POST", `/api/invites/${inviteId}/accept`, { cookie: bob })).status, 200);
-  assert.equal((await call("POST", `/api/invites/${inviteId}/accept`, { cookie: bob })).status, 404, "can't accept twice");
+  assert.deepEqual(res.body.invites[0], createdInvite, "members only returns public invite metadata");
+  assert.ok(res.body.invites.every((invite) => !("token" in invite) && !("tokenHash" in invite)));
+  assert.equal((await call("GET", "/api/invites", { cookie: bob })).status, 404, "there is no email-matched invite list");
+  assert.equal((await call("POST", `/api/invites/${inviteId}/accept`, { cookie: bob })).status, 404, "invite ids don't grant access");
+  assert.equal((await call("GET", `/api/invites/${inviteToken}`)).status, 401);
+  for (const path of ["not-a-token", "x".repeat(32)]) {
+    for (const [method, suffix] of [["GET", ""], ["POST", "/accept"], ["POST", "/decline"]]) {
+      res = await call(method, `/api/invites/${path}${suffix}`, { cookie: bob });
+      assert.equal(res.status, 404);
+      assert.equal(res.body.message, invalidInvite);
+    }
+  }
+
+  res = await call("GET", `/api/invites/${inviteToken}`, { cookie: bob });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.invite, {
+    site: { _id: siteId, name: "Shop", domain: "shop.example.com" },
+    role: "viewer", invitedBy: { name: "Asha" }, expiresAt: createdInvite.expiresAt, alreadyMember: false,
+  });
+  res = await call("POST", `/api/invites/${inviteToken}/accept`, { cookie: bob });
+  assert.equal(res.status, 200, "possession of the link grants access, regardless of the display label");
+  assert.equal(res.body.message, "You joined Shop");
+  assert.equal(res.body.site.role, "viewer");
+  assert.equal((await call("POST", `/api/invites/${inviteToken}/accept`, { cookie: eve })).status, 404, "a link only admits one person");
+  assert.equal((await call("GET", `/api/invites/${inviteToken}`, { cookie: eve })).status, 404);
+  assert.equal((await call("GET", `/api/sites/${siteId}`, { cookie: eve })).status, 404);
+  assert.equal((await call("POST", `/api/invites/${inviteToken}/accept`, { cookie: bob })).status, 404, "can't accept twice");
   assert.equal((await call("GET", `/api/sites/${siteId}/stats`, { cookie: bob })).status, 200, "viewer can read");
+  assert.equal((await call("POST", `/api/sites/${siteId}/invites`, { cookie: bob, body: { role: "viewer" } })).status, 403, "viewers can't create invite links");
   assert.equal((await call("POST", `/api/sites/${siteId}/funnels`, { cookie: bob, body: { name: "x", steps } })).status, 403, "viewer can't write");
   assert.equal((await call("POST", `/api/sites/${siteId}/share`, { cookie: bob })).status, 403);
   res = await call("GET", `/api/sites/${siteId}/members`, { cookie: bob });
   assert.deepEqual(res.body.members.map((m) => m.role), ["owner", "viewer"]);
   assert.deepEqual(res.body.invites, [], "viewers don't see pending invites");
   const bobId = res.body.members[1].user._id;
+  const ashaId = res.body.members[0].user._id;
+  const acceptedInvite = await Invite.findById(inviteId);
+  assert.equal(acceptedInvite.status, "accepted");
+  assert.equal(String(acceptedInvite.acceptedBy), bobId);
+
+  // Existing members keep their roles, including when the invite offers more access.
+  res = await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { role: "admin" } });
+  const memberToken = res.body.token;
+  assert.equal((await call("GET", `/api/invites/${memberToken}`, { cookie: bob })).body.invite.alreadyMember, true);
+  res = await call("POST", `/api/invites/${memberToken}/accept`, { cookie: bob });
+  assert.equal(res.body.message, "You already have access");
+  assert.equal(res.body.site.role, "viewer");
+  assert.equal(res.body.site.shareToken, undefined);
+  assert.equal((await call("GET", `/api/sites/${siteId}`, { cookie: bob })).body.site.role, "viewer");
+
+  res = await call("POST", `/api/sites/${siteId}/invites`, { cookie: asha, body: { role: "viewer", label: "Owner" } });
+  const ownerToken = res.body.token;
+  const ownerInviteId = res.body.invite._id;
+  assert.equal((await call("GET", `/api/invites/${ownerToken}`, { cookie: asha })).body.invite.alreadyMember, true);
+  res = await call("POST", `/api/invites/${ownerToken}/accept`, { cookie: asha });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.message, "You already have access");
+  assert.equal(res.body.site.role, "owner");
+  assert.equal(String((await Invite.findById(ownerInviteId)).acceptedBy), ashaId);
+  assert.equal((await call("POST", `/api/invites/${ownerToken}/accept`, { cookie: eve })).status, 404);
+
   assert.equal((await call("PATCH", `/api/sites/${siteId}/members/${bobId}`, { cookie: asha, body: { role: "admin" } })).status, 200);
   assert.equal((await call("POST", `/api/sites/${siteId}/funnels`, { cookie: bob, body: { name: "Bob's", steps } })).status, 201, "admin can write");
   assert.equal((await call("DELETE", `/api/sites/${siteId}`, { cookie: bob })).status, 403, "only the owner deletes");
+
+  res = await call("POST", `/api/sites/${siteId}/invites`, { cookie: bob, body: { role: "viewer", label: "Expired" } });
+  assert.equal(res.status, 201, "admins can create invite links");
+  const expiredToken = res.body.token;
+  const expiredInviteId = res.body.invite._id;
+  await Invite.updateOne({ _id: expiredInviteId }, { expiresAt: new Date(Date.now() - 1000) });
+  for (const [method, suffix] of [["GET", ""], ["POST", "/accept"], ["POST", "/decline"]]) {
+    res = await call(method, `/api/invites/${expiredToken}${suffix}`, { cookie: eve });
+    assert.equal(res.status, 404);
+    assert.equal(res.body.message, invalidInvite);
+  }
+  assert.deepEqual((await call("GET", `/api/sites/${siteId}/members`, { cookie: asha })).body.invites, [], "expired invites aren't listed");
+
+  res = await call("POST", `/api/sites/${siteId}/invites`, { cookie: bob, body: { role: "admin", label: "Decline" } });
+  const declinedToken = res.body.token;
+  const declinedInviteId = res.body.invite._id;
+  res = await call("POST", `/api/invites/${declinedToken}/decline`, { cookie: eve });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.message, "Invite declined");
+  assert.equal((await Invite.findById(declinedInviteId)).status, "declined");
+  assert.equal((await call("POST", `/api/invites/${declinedToken}/decline`, { cookie: eve })).status, 404);
+  assert.equal((await call("POST", `/api/invites/${declinedToken}/accept`, { cookie: eve })).status, 404);
+  assert.equal((await call("GET", `/api/invites/${declinedToken}`, { cookie: eve })).status, 404);
+
+  res = await call("POST", `/api/sites/${siteId}/invites`, { cookie: bob, body: { role: "viewer" } });
+  const cancelledToken = res.body.token;
+  const cancelledInviteId = res.body.invite._id;
+  assert.equal((await call("DELETE", `/api/sites/${siteId}/invites/${cancelledInviteId}`, { cookie: bob })).status, 200);
+  assert.equal((await call("GET", `/api/invites/${cancelledToken}`, { cookie: eve })).status, 404);
+  assert.equal((await call("POST", `/api/invites/${cancelledToken}/accept`, { cookie: eve })).status, 404);
+  assert.equal(await Invite.findById(cancelledInviteId), null);
+
+  // Even simultaneous accepts from different accounts only add one member.
+  res = await call("POST", "/api/sites", { cookie: asha, body: { name: "Team", domain: "team.example.com" } });
+  const teamSiteId = res.body.site._id;
+  res = await call("POST", `/api/sites/${teamSiteId}/invites`, { cookie: asha, body: { role: "viewer" } });
+  const raceToken = res.body.token;
+  const raceInviteId = res.body.invite._id;
+  const answers = await Promise.all([bob, eve].map((cookie) => call("POST", `/api/invites/${raceToken}/accept`, { cookie })));
+  assert.deepEqual(answers.map((answer) => answer.status).sort(), [200, 404]);
+  const raceSite = await Site.findById(teamSiteId);
+  const raceInvite = await Invite.findById(raceInviteId);
+  assert.equal(raceSite.members.length, 1);
+  assert.equal(String(raceInvite.acceptedBy), String(raceSite.members[0].user));
+
+  // Simulate a crash after adding membership, before consuming the invite.
+  await Invite.updateOne({ _id: raceInviteId }, { status: "pending" });
+  const winner = answers[0].status === 200 ? bob : eve;
+  const loser = answers[0].status === 200 ? eve : bob;
+  assert.equal((await call("POST", `/api/invites/${raceToken}/accept`, { cookie: loser })).status, 404);
+  res = await call("POST", `/api/invites/${raceToken}/accept`, { cookie: winner });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.message, "You already have access");
+  assert.equal((await Site.findById(teamSiteId)).members.length, 1, "retrying doesn't add duplicate members");
+  assert.equal((await Invite.findById(raceInviteId)).status, "accepted");
+  assert.equal((await call("DELETE", `/api/sites/${teamSiteId}`, { cookie: asha })).status, 200);
 
   // Public share link
   res = await call("POST", `/api/sites/${siteId}/share`, { cookie: asha });

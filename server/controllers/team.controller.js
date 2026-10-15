@@ -1,12 +1,22 @@
 import mongoose from "mongoose";
+import { createHash, randomBytes } from "node:crypto";
 import Site from "../models/site.model.js";
-import User from "../models/user.model.js";
 import Invite from "../models/invite.model.js";
-import { isEmail } from "../utils/validate.js";
 import { publicSite } from "./site.controller.js";
-import { emitToUser, resetWatchers } from "../socket.js";
+import { roleOf } from "../middlewares/site.middleware.js";
+import { resetWatchers } from "../socket.js";
 
 const ROLES = ["admin", "viewer"];
+const INVITE_FIELDS = "role label expiresAt createdAt";
+const INVALID_INVITE = "This invite link is invalid, expired or already used";
+const hashToken = (token) => createHash("sha256").update(token).digest("hex");
+
+const pendingInvite = (token, userId) => /^[A-Za-z0-9_-]{32}$/.test(token) ? {
+  tokenHash: hashToken(token),
+  status: "pending",
+  expiresAt: { $gt: new Date() },
+  $or: [{ acceptedBy: { $exists: false } }, { acceptedBy: userId }],
+} : null;
 
 export const listMembers = async (req, res) => {
   const site = await req.site.populate([
@@ -20,42 +30,43 @@ export const listMembers = async (req, res) => {
   ];
 
   // Only people who can manage the team see who's been invited.
-  const invites = req.role === "viewer" ? [] : await Invite.find({ site: site._id, status: "pending" }).select("email role createdAt");
+  const invites = req.role === "viewer" ? [] : await Invite.find({ site: site._id, status: "pending", expiresAt: { $gt: new Date() } }).select(INVITE_FIELDS);
 
   res.json({ members: people, invites });
 };
 
 export const inviteMember = async (req, res) => {
-  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
-  const { role } = req.body ?? {};
+  const { role, label } = req.body ?? {};
 
-  if (!isEmail(email)) {
-    return res.status(400).json({ message: "Enter a valid email address" });
-  }
   if (!ROLES.includes(role)) {
     return res.status(400).json({ message: "Role must be admin or viewer" });
   }
-
-  const invitee = await User.findOne({ email }).select("_id");
-  const hasAccess = invitee && (req.site.owner.equals(invitee._id) || req.site.members.some((m) => m.user.equals(invitee._id)));
-  if (hasAccess) {
-    return res.status(409).json({ message: `${email} already has access` });
+  if (label !== undefined && typeof label !== "string") {
+    return res.status(400).json({ message: "Label must be text" });
+  }
+  if (label?.trim().length > 80) {
+    return res.status(400).json({ message: "Label must be 80 characters or fewer" });
   }
 
-  if (await Invite.exists({ site: req.site._id, email, status: "pending" })) {
-    return res.status(409).json({ message: `${email} has already been invited` });
-  }
+  const token = randomBytes(24).toString("base64url");
+  const createdAt = new Date();
+  const invite = await Invite.create({
+    site: req.site._id,
+    role,
+    label: label?.trim(),
+    invitedBy: req.user._id,
+    tokenHash: hashToken(token),
+    createdAt,
+    expiresAt: new Date(createdAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+  });
 
-  const invite = await Invite.create({ site: req.site._id, email, role, invitedBy: req.user._id });
-  if (invitee) emitToUser(invitee._id, "invite", { siteName: req.site.name });
-
-  res.status(201).json({ invite: { _id: invite._id, email, role, createdAt: invite.createdAt } });
+  res.status(201).json({ invite: { _id: invite._id, role, label: invite.label, expiresAt: invite.expiresAt, createdAt: invite.createdAt }, token });
 };
 
 export const cancelInvite = async (req, res) => {
   const deleted = await Invite.findOneAndDelete({ _id: req.params.inviteId, site: req.site._id, status: "pending" });
   if (!deleted) return res.status(404).json({ message: "Invite not found" });
-  res.json({ message: `Invite for ${deleted.email} cancelled` });
+  res.json({ message: "Invite cancelled" });
 };
 
 export const changeRole = async (req, res) => {
@@ -95,48 +106,65 @@ export const removeMember = async (req, res) => {
   res.json({ message: leaving ? "You left the site" : "Member removed" });
 };
 
-export const myInvites = async (req, res) => {
-  const invites = await Invite.find({ email: req.user.email, status: "pending" })
-    .populate("site", "name domain")
-    .populate("invitedBy", "name")
-    .sort({ createdAt: -1 });
+export const previewInvite = async (req, res) => {
+  const filter = pendingInvite(req.params.token, req.user._id);
+  if (!filter) return res.status(404).json({ message: INVALID_INVITE });
 
-  res.json({ invites: invites.filter((invite) => invite.site) });
+  const invite = await Invite.findOne(filter)
+    .populate("site", "name domain owner members")
+    .populate("invitedBy", "name");
+  if (!invite?.site) return res.status(404).json({ message: INVALID_INVITE });
+
+  const site = invite.site;
+  res.json({ invite: {
+    site: { _id: site._id, name: site.name, domain: site.domain },
+    role: invite.role,
+    invitedBy: { name: invite.invitedBy?.name ?? "Someone" },
+    expiresAt: invite.expiresAt,
+    alreadyMember: Boolean(roleOf(site, req.user._id)),
+  } });
 };
 
-const answer = (status) => async (req, res) => {
-  if (!mongoose.isValidObjectId(req.params.inviteId)) {
-    return res.status(404).json({ message: "Invite not found" });
-  }
+export const acceptInvite = async (req, res) => {
+  const me = req.user._id;
+  const filter = pendingInvite(req.params.token, me);
+  if (!filter) return res.status(404).json({ message: INVALID_INVITE });
 
-  // Flipping the status in one step means a double click can't accept twice.
+  // Reserve the link for this account so two people can't join with it at once.
+  // Keeping it pending lets this person retry if adding access is interrupted.
   const invite = await Invite.findOneAndUpdate(
-    { _id: req.params.inviteId, email: req.user.email, status: "pending" },
-    { status },
+    filter,
+    { acceptedBy: me },
     { returnDocument: "after" }
   );
-  if (!invite) {
-    return res.status(404).json({ message: "This invite was already answered or cancelled" });
-  }
+  if (!invite) return res.status(404).json({ message: INVALID_INVITE });
 
-  if (status === "declined") {
-    return res.json({ message: "Invite declined" });
-  }
-
-  const me = req.user._id;
-  const site = await Site.findOneAndUpdate(
+  const joined = await Site.findOneAndUpdate(
     { _id: invite.site, owner: { $ne: me }, "members.user": { $ne: me } },
     { $push: { members: { user: me, role: invite.role } } },
     { returnDocument: "after" }
   );
-  if (!site) {
-    const existing = await Site.findById(invite.site);
-    if (!existing) return res.status(404).json({ message: "That site no longer exists" });
-    return res.json({ message: "You already have access", site: publicSite(existing, invite.role) });
-  }
+  const site = joined ?? await Site.findById(invite.site);
+  if (!site) return res.status(404).json({ message: INVALID_INVITE });
 
-  res.json({ message: `You joined ${site.name}`, site: publicSite(site, invite.role) });
+  // Add access before consuming the link, so a retry can finish an interrupted accept.
+  const accepted = await Invite.updateOne(
+    { _id: invite._id, status: "pending", acceptedBy: me },
+    { status: "accepted", acceptedBy: me }
+  );
+  if (accepted.modifiedCount === 0) return res.status(404).json({ message: INVALID_INVITE });
+
+  res.json({ message: joined ? `You joined ${site.name}` : "You already have access", site: publicSite(site, roleOf(site, me)) });
 };
 
-export const acceptInvite = answer("accepted");
-export const declineInvite = answer("declined");
+export const declineInvite = async (req, res) => {
+  const filter = pendingInvite(req.params.token, req.user._id);
+  if (!filter) return res.status(404).json({ message: INVALID_INVITE });
+
+  const declined = await Invite.findOneAndUpdate(
+    { ...filter, acceptedBy: { $exists: false } },
+    { status: "declined" }
+  );
+  if (!declined) return res.status(404).json({ message: INVALID_INVITE });
+  res.json({ message: "Invite declined" });
+};
