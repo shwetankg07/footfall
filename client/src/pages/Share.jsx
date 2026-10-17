@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useApi } from "../hooks/useApi";
 import { socket } from "../services/socket";
-import Logo from "../components/Logo";
+import PublicBar from "../components/PublicBar";
 import LiveCount from "../components/LiveCount";
 import TrafficView from "../components/TrafficView";
 
@@ -31,12 +31,9 @@ export default function Share() {
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <Link to="/" className="wordmark"><Logo />Footfall</Link>
-          <nav><Link to="/register" className="btn">Get your own</Link></nav>
-        </div>
-      </header>
+      <PublicBar>
+        <Link to="/register" className="btn primary">Get your own</Link>
+      </PublicBar>
       <main className="page">
         {error && (
           <div className="empty">
@@ -46,14 +43,14 @@ export default function Share() {
         )}
         {site && (
           <>
-            <div className="site-head">
-              <div className="stack" style={{ gap: 2 }}>
+            <div className="page-head">
+              <div className="title">
                 <h1>{site.name}</h1>
-                <span className="muted small">{site.domain} · public dashboard</span>
+                <span>{site.domain} · public dashboard</span>
               </div>
               <LiveCount count={live ?? site.live} />
             </div>
-            <TrafficView apiBase={`/api/share/${token}`} timezone={site.timezone} />
+            <TrafficView apiBase={`/api/share/${token}`} timezone={site.timezone} limitedHistory={site.plan === "free"} />
           </>
         )}
       </main>
