@@ -8,6 +8,7 @@ import siteRoutes from "./routes/site.routes.js";
 import inviteRoutes from "./routes/invite.routes.js";
 import shareRoutes from "./routes/share.routes.js";
 import alertRoutes from "./routes/alert.routes.js";
+import billingRoutes from "./routes/billing.routes.js";
 import { flushAlerts } from "./controllers/alert.controller.js";
 import { collect } from "./controllers/collect.controller.js";
 import { notFound, errorHandler } from "./middlewares/error.middleware.js";
@@ -44,6 +45,7 @@ app.use("/api/sites", siteRoutes);
 app.use("/api/invites", inviteRoutes);
 app.use("/api/share", shareRoutes);
 app.use("/api/alerts", alertRoutes);
+app.use("/api/billing", billingRoutes);
 
 // Called by the hourly ML job (GitHub Actions), authenticated with INTERNAL_SECRET.
 app.post("/internal/alerts/flush", flushAlerts);

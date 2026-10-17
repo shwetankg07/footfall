@@ -1,7 +1,7 @@
 // End-to-end: starts the real server against an in-memory MongoDB and walks every workflow.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { io } from "socket.io-client";
@@ -10,10 +10,14 @@ import Alert from "./models/alert.model.js";
 import Forecast from "./models/forecast.model.js";
 import Invite from "./models/invite.model.js";
 import Site from "./models/site.model.js";
+import User from "./models/user.model.js";
+import Payment from "./models/payment.model.js";
+import Insight from "./models/insight.model.js";
 
 const PORT = 8098;
 const BASE = `http://localhost:${PORT}`;
 const SECRET = "test-internal-secret";
+const RZP_SECRET = "test-razorpay-secret";
 const mongo = await MongoMemoryServer.create();
 
 const server = spawn("node", ["index.js"], {
@@ -21,6 +25,7 @@ const server = spawn("node", ["index.js"], {
     ...process.env, PORT: String(PORT), MONGO_URI: mongo.getUri(), MONGO_DB: "footfall-test",
     JWT_SECRET: "test-secret", CLIENT_URL: "http://localhost:5173", INTERNAL_SECRET: SECRET,
     RESEND_API_KEY: "", NODE_ENV: "test",
+    RAZORPAY_KEY_ID: "rzp_test_dummy", RAZORPAY_KEY_SECRET: RZP_SECRET,
   },
   stdio: ["ignore", "pipe", "inherit"],
 });
@@ -316,6 +321,60 @@ try {
   assert.equal((await call("GET", "/api/alerts", { cookie: bob })).body.unread, 0);
   assert.equal((await call("GET", "/api/alerts", { cookie: asha })).body.unread, 1, "read state is per person");
   assert.equal((await call("GET", "/api/alerts", { cookie: eve })).body.alerts.length, 0);
+
+  // Plans: everyone starts on a 14-day trial of Pro
+  let me = (await call("GET", "/api/auth/me", { cookie: asha })).body.user;
+  assert.equal(me.plan.tier, "trial");
+  assert.ok(new Date(me.plan.until) - Date.now() > 13 * 24 * 3600 * 1000);
+  assert.equal((await call("GET", `/api/sites/${siteId}`, { cookie: bob })).body.site.plan, "trial", "a site has its owner's plan");
+  await Insight.create({ site: siteId, kind: "opportunities", key: "site", computedAt: new Date(), items: [{ type: "peak_hours", title: "Most visitors arrive Tue 8 to 10 pm" }] });
+  res = await call("GET", `/api/sites/${siteId}/insights`, { cookie: bob });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.opportunities.items[0].type, "peak_hours");
+  assert.equal(res.body.opportunities.site, undefined);
+
+  // When the trial ends, the site drops to free: no Intelligence, 30 days of history, 3 sites
+  await User.updateOne({ email: "asha@example.com" }, { trialEndsAt: new Date(Date.now() - 1000) });
+  assert.equal((await call("GET", "/api/auth/me", { cookie: asha })).body.user.plan.tier, "free");
+  for (const path of ["forecast", "insights", `funnels/${funnelId}/drivers`]) {
+    res = await call("GET", `/api/sites/${siteId}/${path}`, { cookie: bob });
+    assert.equal(res.status, 402, `${path} is Pro only`);
+    assert.equal(res.body.upgrade, true);
+  }
+  const old = `from=${new Date(Date.now() - 60 * 864e5).toISOString()}&to=${new Date().toISOString()}`;
+  assert.equal((await call("GET", `/api/sites/${siteId}/stats?${old}`, { cookie: asha })).status, 402, "free history is 30 days");
+  assert.equal((await call("GET", `/api/sites/${siteId}/funnels/${funnelId}?${old}`, { cookie: asha })).status, 402);
+  assert.equal((await call("GET", `/api/sites/${siteId}/stats`, { cookie: asha })).status, 200, "the last 7 days stay free");
+  for (const n of [2, 3]) {
+    assert.equal((await call("POST", "/api/sites", { cookie: asha, body: { name: `Site ${n}`, domain: `site${n}.example.com` } })).status, 201);
+  }
+  res = await call("POST", "/api/sites", { cookie: asha, body: { name: "Site 4", domain: "site4.example.com" } });
+  assert.equal(res.status, 402, "free accounts own up to 3 sites");
+
+  // Paying for Pro: the server only trusts Razorpay's signature
+  res = await call("GET", "/api/billing", { cookie: asha });
+  assert.equal(res.body.paymentsEnabled, true);
+  assert.equal(res.body.prices.month.amount, 49900);
+  assert.equal((await call("POST", "/api/billing/checkout", { cookie: asha, body: { interval: "weekly" } })).status, 400);
+  const ashaUser = await User.findOne({ email: "asha@example.com" });
+  await Payment.create({ user: ashaUser._id, interval: "month", amount: 49900, razorpayOrderId: "order_test_1" });
+  const sign = (orderId, paymentId) => createHmac("sha256", RZP_SECRET).update(`${orderId}|${paymentId}`).digest("hex");
+  res = await call("POST", "/api/billing/verify", { cookie: asha, body: { orderId: "order_test_1", paymentId: "pay_1", signature: "0".repeat(64) } });
+  assert.equal(res.status, 400, "a forged signature buys nothing");
+  assert.equal((await call("POST", "/api/billing/verify", { cookie: eve, body: { orderId: "order_test_1", paymentId: "pay_1", signature: sign("order_test_1", "pay_1") } })).status, 404, "someone else's order");
+  res = await call("POST", "/api/billing/verify", { cookie: asha, body: { orderId: "order_test_1", paymentId: "pay_1", signature: sign("order_test_1", "pay_1") } });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.plan.tier, "pro");
+  const until = new Date(res.body.plan.until);
+  assert.ok(Math.abs(until - Date.now() - 30 * 864e5) < 60 * 1000, "a month from now");
+  res = await call("POST", "/api/billing/verify", { cookie: asha, body: { orderId: "order_test_1", paymentId: "pay_1", signature: sign("order_test_1", "pay_1") } });
+  assert.equal(new Date(res.body.plan.until).getTime(), until.getTime(), "replaying a payment doesn't extend Pro");
+  await Payment.create({ user: ashaUser._id, interval: "year", amount: 499000, razorpayOrderId: "order_test_2" });
+  res = await call("POST", "/api/billing/verify", { cookie: asha, body: { orderId: "order_test_2", paymentId: "pay_2", signature: sign("order_test_2", "pay_2") } });
+  assert.ok(Math.abs(new Date(res.body.plan.until) - until - 365 * 864e5) < 60 * 1000, "a second payment stacks on the first");
+  assert.equal((await call("GET", `/api/sites/${siteId}/forecast`, { cookie: bob })).status, 200, "Pro brings Intelligence back");
+  assert.equal((await call("POST", "/api/sites", { cookie: asha, body: { name: "Site 4", domain: "site4.example.com" } })).status, 201, "and more sites");
+  assert.equal((await call("GET", "/api/billing", { cookie: asha })).body.payments.length, 2);
 
   // Leaving and deleting
   assert.equal((await call("DELETE", `/api/sites/${siteId}/members/${bobId}`, { cookie: bob })).status, 200, "members can leave");
