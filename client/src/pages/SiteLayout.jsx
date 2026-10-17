@@ -44,28 +44,30 @@ export default function SiteLayout() {
     );
   }
 
-  if (!site) return <main className="page"><p className="muted">Loading…</p></main>;
+  if (!site) {
+    return (
+      <main className="page" aria-busy="true">
+        <div className="skeleton" style={{ height: 28, width: 220 }} />
+        <div className="skeleton" style={{ height: 92 }} />
+        <div className="skeleton" style={{ height: 300 }} />
+      </main>
+    );
+  }
 
   const context = { site: { ...site, installed: installed ?? site.installed }, live: live ?? site.live ?? 0, reloadSite: reload };
 
   return (
     <main className="page">
-      <div className="site-head">
-        <div className="stack" style={{ gap: 2 }}>
-          <div className="row">
+      <header className="page-head">
+        <div className="title">
+          <div className="row" style={{ gap: 8 }}>
             <h1>{site.name}</h1>
-            <span className="badge">{site.role}</span>
+            {site.role !== "owner" && <span className="badge">{site.role}</span>}
           </div>
-          <a className="muted small" href={`https://${site.domain}`} target="_blank" rel="noreferrer">{site.domain}</a>
+          <a href={`https://${site.domain}`} target="_blank" rel="noreferrer">{site.domain}</a>
         </div>
         <LiveCount count={context.live} />
-      </div>
-      <nav className="tabs" aria-label="Site sections">
-        <NavLink end to={`/sites/${siteId}`}>Overview</NavLink>
-        <NavLink to={`/sites/${siteId}/funnels`}>Funnels</NavLink>
-        <NavLink to={`/sites/${siteId}/insights`}>Forecast &amp; alerts</NavLink>
-        <NavLink to={`/sites/${siteId}/settings`}>Settings</NavLink>
-      </nav>
+      </header>
       <Outlet context={context} />
     </main>
   );
