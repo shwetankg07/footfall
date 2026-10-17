@@ -1,6 +1,6 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://footfall-api.onrender.com/api/:path*" },
+    { "source": "/api/:path*", "destination": "https://footfall-ebpq.onrender.com/api/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

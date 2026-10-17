@@ -2,10 +2,17 @@
 
 Footfall is web analytics for small websites, run as a freemium SaaS. You add one line to your site, and the dashboard shows who visits, which pages they read, where they came from and where they give up, free and without cookies. Footfall Pro adds Intelligence: models that learn each site's normal traffic, alert you when it breaks, explain what caused it, find which visitors convert better, and rank what's worth fixing.
 
-- Dashboard: https://footfall-sigma.vercel.app
+- App: https://footfall-sigma.vercel.app
+- Live demo, no login: https://footfall-sigma.vercel.app/share/cRYdX41uOw17y8mhwVMHL8em
+- Demo login (Pro, with a seeded shop): `demo@example.com` / `footfall-demo`
+- API: https://footfall-ebpq.onrender.com/health
 - Source: https://github.com/shwetankg07/footfall
 
-The API runs on Render's free tier. A scheduled ping keeps it awake, but if it was asleep the first request can take up to a minute.
+The demo shop holds 28 days of generated traffic, clearly a demo: two source-driven spikes and a 3-hour outage are planted in it, so the Intelligence page has something real to find. Sign up with any email to get your own account, starting on the 14-day Pro trial.
+
+To try a payment, open Plan and billing and pay in Razorpay test mode. Use card `4111 1111 1111 1111` with any future date and any CVV, or choose Netbanking, any bank, then Success. No real money moves.
+
+The API runs on Render's free tier. A scheduled ping keeps it awake from 05:30 to 00:30 IST. Outside those hours the first request can take up to a minute.
 
 ## Problem
 

@@ -1,10 +1,12 @@
 # Render's free tier sleeps after 15 idle minutes, and page views sent while it
-# wakes up (about a minute) are lost. A ping every 10 minutes keeps it up.
+# wakes up (about a minute) are lost. A ping every 10 minutes keeps it up, but only
+# from 05:30 to 00:30 IST: free instance hours are shared across the Render workspace
+# (750 a month), and awake all day this one service would use almost all of them.
 name: keep-api-awake
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/10 0-18 * * *"
   workflow_dispatch:
 
 jobs:
