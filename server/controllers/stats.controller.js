@@ -1,14 +1,17 @@
 import Forecast from "../models/forecast.model.js";
 import { parseRange } from "../utils/range.js";
 import { siteStats } from "../utils/stats.js";
+import { historyError } from "../utils/plan.js";
 
 // ponytail: 10s in-process cache so a dashboard refresh storm costs one aggregation; drop or move to Redis with more instances.
 const CACHE_MS = 10 * 1000;
 const cache = new Map();
 
-export const statsFor = async (site, query) => {
+export const statsFor = async (site, query, plan) => {
   const range = parseRange(query);
   if (range.error) return range;
+  const limited = historyError(plan, range.from);
+  if (limited) return { error: limited, status: 402 };
 
   const key = `${site._id}|${range.from.toISOString()}|${range.to.toISOString()}|${range.unit}`;
   const hit = cache.get(key);
@@ -21,8 +24,8 @@ export const statsFor = async (site, query) => {
 };
 
 export const getStats = async (req, res) => {
-  const stats = await statsFor(req.site, req.query);
-  if (stats.error) return res.status(400).json({ message: stats.error });
+  const stats = await statsFor(req.site, req.query, req.sitePlan);
+  if (stats.error) return res.status(stats.status ?? 400).json({ message: stats.error, upgrade: stats.status === 402 || undefined });
   res.json(stats);
 };
 

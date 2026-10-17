@@ -4,16 +4,19 @@ import Funnel from "../models/funnel.model.js";
 import Invite from "../models/invite.model.js";
 import Alert from "../models/alert.model.js";
 import Forecast from "../models/forecast.model.js";
+import Insight from "../models/insight.model.js";
 import { filled } from "../utils/validate.js";
 import { normalizeDomain } from "../utils/domain.js";
 import { forgetDomain } from "../utils/siteCache.js";
 import { liveCount, forget } from "../utils/live.js";
 import { roleOf } from "../middlewares/site.middleware.js";
+import User from "../models/user.model.js";
+import { planOf, hasIntelligence, FREE_LIMITS } from "../utils/plan.js";
 import { resetWatchers } from "../socket.js";
 
 const TIMEZONES = new Set(Intl.supportedValuesOf("timeZone"));
 
-export const publicSite = (site, role) => ({
+export const publicSite = (site, role, plan) => ({
   _id: site._id,
   name: site.name,
   domain: site.domain,
@@ -22,6 +25,7 @@ export const publicSite = (site, role) => ({
   installed: Boolean(site.firstEventAt),
   // Only people who can manage sharing need to see the token.
   shareToken: role === "viewer" ? undefined : site.shareToken,
+  plan: plan?.tier,
   createdAt: site.createdAt,
 });
 
@@ -37,10 +41,12 @@ export const listSites = async (req, res) => {
     { $project: { pageviews: 1, visitors: { $size: "$visitors" } } },
   ]);
   const bySite = new Map(totals.map((row) => [String(row._id), row]));
+  const owners = await User.find({ _id: { $in: sites.map((site) => site.owner) } }).select("proUntil trialEndsAt");
+  const planByOwner = new Map(owners.map((owner) => [String(owner._id), planOf(owner)]));
 
   res.json({
     sites: sites.map((site) => ({
-      ...publicSite(site, roleOf(site, me)),
+      ...publicSite(site, roleOf(site, me), planByOwner.get(String(site.owner))),
       last24h: { pageviews: bySite.get(String(site._id))?.pageviews ?? 0, visitors: bySite.get(String(site._id))?.visitors ?? 0 },
       live: liveCount(site._id),
     })),
@@ -59,17 +65,22 @@ export const createSite = async (req, res) => {
     return res.status(400).json({ message: "Enter a domain like example.com" });
   }
 
+  const owned = await Site.countDocuments({ owner: req.user._id });
+  if (owned >= FREE_LIMITS.sites && !hasIntelligence(planOf(req.user))) {
+    return res.status(402).json({ message: `The free plan includes ${FREE_LIMITS.sites} sites. Upgrade to Pro to add more.`, upgrade: true });
+  }
+
   if (await Site.exists({ domain: cleanDomain })) {
     return res.status(409).json({ message: `${cleanDomain} is already on Footfall` });
   }
 
   const site = await Site.create({ name: name.trim().slice(0, 80), domain: cleanDomain, owner: req.user._id });
   forgetDomain(cleanDomain);
-  res.status(201).json({ site: publicSite(site, "owner") });
+  res.status(201).json({ site: publicSite(site, "owner", planOf(req.user)) });
 };
 
 export const getSite = (req, res) => {
-  res.json({ site: { ...publicSite(req.site, req.role), live: liveCount(req.site._id) } });
+  res.json({ site: { ...publicSite(req.site, req.role, req.sitePlan), live: liveCount(req.site._id) } });
 };
 
 export const updateSite = async (req, res) => {
@@ -86,12 +97,12 @@ export const updateSite = async (req, res) => {
   }
 
   await req.site.save();
-  res.json({ site: publicSite(req.site, req.role) });
+  res.json({ site: publicSite(req.site, req.role, req.sitePlan) });
 };
 
 export const deleteSite = async (req, res) => {
   const site = req.site;
-  await Promise.all([Event, Funnel, Invite, Alert, Forecast].map((Model) => Model.deleteMany({ site: site._id })));
+  await Promise.all([Event, Funnel, Invite, Alert, Forecast, Insight].map((Model) => Model.deleteMany({ site: site._id })));
   await site.deleteOne();
   forgetDomain(site.domain);
   forget(site._id);

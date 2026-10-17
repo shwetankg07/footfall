@@ -3,6 +3,7 @@ import Event from "../models/event.model.js";
 import { filled } from "../utils/validate.js";
 import { parseRange } from "../utils/range.js";
 import { funnelResult } from "../utils/funnel.js";
+import { historyError } from "../utils/plan.js";
 
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -63,6 +64,8 @@ export const getFunnelResult = async (req, res) => {
 
   const range = parseRange(req.query);
   if (range.error) return res.status(400).json({ message: range.error });
+  const limited = historyError(req.sitePlan, range.from);
+  if (limited) return res.status(402).json({ message: limited, upgrade: true });
 
   // ponytail: ordering is checked in Node per visitor; fine for thousands of visitors a range,
   // move the walk into $setWindowFields if a site ever has millions.

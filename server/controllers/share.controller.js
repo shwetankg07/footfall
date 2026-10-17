@@ -3,6 +3,7 @@ import Site from "../models/site.model.js";
 import { statsFor } from "./stats.controller.js";
 import { liveCount } from "../utils/live.js";
 import { resetWatchers } from "../socket.js";
+import { sitePlan } from "../middlewares/site.middleware.js";
 
 // Creating a link again replaces the old one, so a leaked link can be killed.
 export const enableShare = async (req, res) => {
@@ -28,16 +29,17 @@ export const sharedSite = async (req, res, next) => {
   }
 
   req.site = site;
+  req.sitePlan = await sitePlan(site, null);
   next();
 };
 
 export const getSharedSite = (req, res) => {
   const { name, domain, timezone } = req.site;
-  res.json({ site: { name, domain, timezone, live: liveCount(req.site._id) } });
+  res.json({ site: { name, domain, timezone, plan: req.sitePlan.tier, live: liveCount(req.site._id) } });
 };
 
 export const getSharedStats = async (req, res) => {
-  const stats = await statsFor(req.site, req.query);
-  if (stats.error) return res.status(400).json({ message: stats.error });
+  const stats = await statsFor(req.site, req.query, req.sitePlan);
+  if (stats.error) return res.status(stats.status ?? 400).json({ message: stats.error });
   res.json(stats);
 };

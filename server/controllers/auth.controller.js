@@ -1,9 +1,10 @@
 import bcrypt from "bcrypt";
 import User from "../models/user.model.js";
 import { filled, isEmail } from "../utils/validate.js";
+import { planOf, TRIAL_DAYS } from "../utils/plan.js";
 import { generateToken, generateSocketToken, cookieOptions } from "../utils/generateToken.js";
 
-const publicUser = (user) => ({ _id: user._id, name: user.name, email: user.email });
+export const publicUser = (user) => ({ _id: user._id, name: user.name, email: user.email, plan: planOf(user) });
 
 export const register = async (req, res) => {
   const { name, email, password } = req.body ?? {};
@@ -26,7 +27,12 @@ export const register = async (req, res) => {
     return res.status(409).json({ message: "An account with this email already exists" });
   }
 
-  const user = await User.create({ name, email, password: await bcrypt.hash(password, 10) });
+  const user = await User.create({
+    name,
+    email,
+    password: await bcrypt.hash(password, 10),
+    trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
+  });
 
   res.cookie("token", generateToken(user._id), cookieOptions);
   res.status(201).json({ user: publicUser(user) });
