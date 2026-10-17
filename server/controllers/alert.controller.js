@@ -14,9 +14,22 @@ export const describeAlert = (alert, site) => {
     timeZone: site.timezone, weekday: "short", hour: "numeric", minute: "2-digit",
   }).format(alert.hour);
   const range = `${Math.round(alert.lo)} to ${Math.round(alert.hi)}`;
-  return alert.kind === "spike"
-    ? `Traffic spike on ${site.domain}: ${alert.actual} page views in the hour from ${when}. Normal is ${range}.`
-    : `Traffic drop on ${site.domain}: ${alert.actual} page views in the hour from ${when}. Normal is ${range}.`;
+  const head = alert.kind === "spike" ? "Traffic spike" : "Traffic drop";
+  return `${head} on ${site.domain}: ${alert.actual} page views in the hour from ${when}. Normal is ${range}.${whyClause(alert)}`;
+};
+
+const SEGMENT_NAMES = { referrer: "from", path: "on", device: "on", country: "from", browser: "on" };
+
+// One plain sentence from the ML job's root cause, e.g. " Most of it came from news.ycombinator.com (82%)."
+const whyClause = (alert) => {
+  if (alert.broad) return alert.kind === "spike" ? " It rose across every source and device." : " Every source and device dropped together, so it looks site-wide.";
+  const top = alert.drivers?.[0];
+  if (!top || !(top.share > 0)) return "";
+  const what = top.dimension === "referrer" && top.value === null ? "direct visits" : top.value ?? "unknown";
+  const share = Math.round(Math.min(top.share, 1) * 100);
+  return top.dimension === "referrer" && top.value === null
+    ? ` Most of it was direct visits (${share}%).`
+    : ` Most of it ${alert.kind === "spike" ? "came" : "was missing"} ${SEGMENT_NAMES[top.dimension] ?? "from"} ${what} (${share}%).`;
 };
 
 const shape = (alert, userId) => ({
@@ -29,6 +42,8 @@ const shape = (alert, userId) => ({
   lo: alert.lo,
   hi: alert.hi,
   message: describeAlert(alert, alert.site),
+  drivers: alert.drivers ?? [],
+  broad: Boolean(alert.broad),
   read: alert.readBy.some((id) => id.equals(userId)),
 });
 

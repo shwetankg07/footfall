@@ -13,6 +13,9 @@ const alertSchema = new mongoose.Schema(
     hi: Number,
     score: Number,
     model: String,
+    // Root cause from the ML job: which segments explain the change, or broad = site-wide.
+    drivers: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+    broad: Boolean,
     createdAt: { type: Date, default: Date.now },
     notifiedAt: { type: Date, default: null },
     emailedAt: { type: Date, default: null },
