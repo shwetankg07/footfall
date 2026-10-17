@@ -5,6 +5,7 @@ import { RANGES, rangeQuery } from "../utils/range";
 import StatTiles from "./StatTiles";
 import TimeChart from "./TimeChart";
 import Breakdown from "./Breakdown";
+import Icon from "./Icon";
 
 const countryName = (() => {
   const names = new Intl.DisplayNames(["en"], { type: "region" });
@@ -22,9 +23,10 @@ const METRIC_LABEL = { visitors: "Unique visitors", pageviews: "Page views" };
 
 // The traffic dashboard body, shared by the signed-in overview and public share links.
 // apiBase is "/api/sites/:id" or "/api/share/:token".
-export default function TrafficView({ apiBase, timezone, forecastPath, before }) {
+export default function TrafficView({ apiBase, timezone, forecastPath, before, limitedHistory = false }) {
   const [params, setParams] = useSearchParams();
-  const rangeKey = params.get("range") ?? "7d";
+  const asked = params.get("range") ?? "7d";
+  const rangeKey = limitedHistory && asked === "90d" ? "30d" : asked;
   const [metric, setMetric] = useState("visitors");
   const query = useMemo(() => rangeQuery(rangeKey), [rangeKey]);
   const stats = useApi(`${apiBase}/stats?${query}`);
@@ -38,11 +40,23 @@ export default function TrafficView({ apiBase, timezone, forecastPath, before })
     <div className="stack" style={{ gap: 20 }}>
       <div className="row" role="group" aria-label="Date range">
         <div className="segmented">
-          {RANGES.map((range) => (
-            <button key={range.key} type="button" aria-pressed={range.key === rangeKey} onClick={() => setParams({ range: range.key }, { replace: true })}>
-              {range.label}
-            </button>
-          ))}
+          {RANGES.map((range) => {
+            // Free sites see 30 days; longer ranges stay visible so people know they exist.
+            const locked = limitedHistory && range.hours > 30 * 24;
+            return (
+              <button
+                key={range.key}
+                type="button"
+                aria-pressed={range.key === rangeKey}
+                disabled={locked}
+                title={locked ? "Full history comes with Footfall Pro" : undefined}
+                onClick={() => setParams({ range: range.key }, { replace: true })}
+              >
+                {locked && <Icon name="lock" size={11} />}
+                {range.label}
+              </button>
+            );
+          })}
         </div>
         {stats.loading && data && <span className="muted small">Updating…</span>}
       </div>
