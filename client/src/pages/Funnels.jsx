@@ -18,7 +18,7 @@ const multiplier = new Intl.NumberFormat("en", { maximumFractionDigits: 1, minim
 
 function driverSubject({ dimension, value }) {
   switch (dimension) {
-    case "referrer": return value ? `Visitors from ${value}` : "Visitors on direct visits";
+    case "referrer": return value ? `Visitors from ${value}` : "Visitors who came directly";
     case "path": return value ? `Visitors who land on ${value}` : "Visitors with an unknown landing page";
     case "country": {
       const code = String(value ?? "").toUpperCase();

@@ -366,6 +366,8 @@ input[readonly] { background: var(--sidebar); font-family: var(--mono); font-siz
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   min-height: 100vh;
+  /* The sidebar is sticky and viewport-tall; this keeps its column tinted all the way down long pages. */
+  background: linear-gradient(to right, var(--sidebar) calc(var(--sidebar-w) - 1px), var(--border) calc(var(--sidebar-w) - 1px) var(--sidebar-w), var(--bg) var(--sidebar-w));
 }
 .sidebar {
   position: sticky;
@@ -554,7 +556,7 @@ input[readonly] { background: var(--sidebar); font-family: var(--mono); font-siz
 .scrim { display: none; }
 
 @media (max-width: 900px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); background: var(--bg); }
   .mobile-bar {
     position: sticky;
     top: 0;
