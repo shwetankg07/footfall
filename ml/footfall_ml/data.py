@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import defaultdict
+import logging
 from typing import Any, Protocol
 
 import pandas as pd
@@ -10,6 +12,9 @@ from pymongo.errors import DuplicateKeyError
 
 from .models import Forecast
 from .time import DEFAULT_TIMEZONE, floor_hour, now_utc, utc
+from .visitors import DIMENSIONS
+
+LOG = logging.getLogger(__name__)
 
 
 def parse_site_id(value: str) -> ObjectId:
@@ -26,6 +31,11 @@ class Repository(Protocol):
     def forecasts(self, site: ObjectId, hours: pd.DatetimeIndex) -> dict[pd.Timestamp, dict[str, Any]]: ...
     def save_forecasts(self, site: ObjectId, forecast: Forecast, issued_at: pd.Timestamp, historical: bool = False, timezone: str = DEFAULT_TIMEZONE) -> int: ...
     def insert_alert(self, alert: dict[str, Any]) -> bool: ...
+    def intelligence_sites(self, now: pd.Timestamp, site: ObjectId | None = None) -> list[dict[str, Any]]: ...
+    def alert_segments(self, site: ObjectId, hour: pd.Timestamp, first: pd.Timestamp, timezone: str) -> tuple[dict, list[dict]]: ...
+    def events(self, site: ObjectId, start: pd.Timestamp, until: pd.Timestamp) -> list[dict[str, Any]]: ...
+    def funnels(self, site: ObjectId) -> list[dict[str, Any]]: ...
+    def upsert_insight(self, document: dict[str, Any]) -> None: ...
 
 
 class MongoRepository:
@@ -45,7 +55,64 @@ class MongoRepository:
                 collection.create_index(keys, unique=True)
 
     def sites(self, site: ObjectId | None = None) -> list[dict[str, Any]]:
-        return list(self.db.sites.find({"_id": site} if site else {}, {"timezone": 1, "name": 1}))
+        return list(self.db.sites.find({"_id": site} if site else {}, {"timezone": 1, "name": 1, "owner": 1}))
+
+    def intelligence_sites(self, now: pd.Timestamp, site: ObjectId | None = None) -> list[dict[str, Any]]:
+        sites = self.sites(site)
+        owners = list({row["owner"] for row in sites if row.get("owner") is not None})
+        query = {"_id": {"$in": owners}, "$or": [{"proUntil": {"$gt": utc(now).to_pydatetime()}}, {"trialEndsAt": {"$gt": utc(now).to_pydatetime()}}]}
+        entitled = {row["_id"] for row in self.db.users.find(query, {"_id": 1})} if owners else set()
+        result = []
+        for row in sites:
+            if row.get("owner") in entitled:
+                result.append(row)
+            else:
+                LOG.info("site %s skipped: free plan", row["_id"])
+        return result
+
+    def ensure_insight_index(self) -> None:
+        keys = [("site", ASCENDING), ("kind", ASCENDING), ("key", ASCENDING)]
+        existing = self.db.insights.index_information().values()
+        if not any(list(index["key"]) == keys and index.get("unique") for index in existing):
+            self.db.insights.create_index(keys, unique=True)
+
+    def events(self, site: ObjectId, start: pd.Timestamp, until: pd.Timestamp) -> list[dict[str, Any]]:
+        fields = {key: 1 for key in ("visitor", "ts", "name", *DIMENSIONS)}
+        return list(self.db.events.find({"site": site, "ts": {"$gte": utc(start).to_pydatetime(), "$lt": utc(until).to_pydatetime()}}, fields).sort([("ts", ASCENDING), ("_id", ASCENDING)]))
+
+    def funnels(self, site: ObjectId) -> list[dict[str, Any]]:
+        return list(self.db.funnels.find({"site": site}))
+
+    def upsert_insight(self, document: dict[str, Any]) -> None:
+        key = {field: document[field] for field in ("site", "kind", "key")}
+        self.db.insights.update_one(key, {"$set": document}, upsert=True)
+
+    def alert_segments(self, site: ObjectId, hour: pd.Timestamp, first: pd.Timestamp, timezone: str) -> tuple[dict, list[dict]]:
+        hour, first = utc(hour), utc(first)
+        local = hour.tz_convert(timezone)
+        references = []
+        for week in range(1, 5):
+            wall = local.tz_localize(None) - pd.DateOffset(weeks=week)
+            prior = wall.tz_localize(timezone, ambiguous=bool(local.dst()), nonexistent="NaT")
+            if pd.isna(prior):
+                if wall >= first.tz_convert(timezone).tz_localize(None):
+                    references.append(None)
+            elif prior.tz_convert("UTC") >= first:
+                prior = prior.tz_convert("UTC")
+                references.append(prior)
+        if len(references) < 2:
+            return {}, []
+        hours = [hour, *(prior for prior in references if prior is not None)]
+        pipeline = [
+            {"$match": {"site": site, "name": "pageview", "$or": [{"ts": {"$gte": h.to_pydatetime(), "$lt": (h + pd.Timedelta(hours=1)).to_pydatetime()}} for h in hours]}},
+            {"$group": {"_id": {"hour": {"$dateTrunc": {"date": "$ts", "unit": "hour", "timezone": timezone}}, **{key: f"${key}" for key in DIMENSIONS}}, "count": {"$sum": 1}}},
+        ]
+        counts = {h: {key: defaultdict(int) for key in DIMENSIONS} for h in hours}
+        for row in self.db.events.aggregate(pipeline):
+            bucket = counts[utc(row["_id"]["hour"])]
+            for key in DIMENSIONS:
+                bucket[key][row["_id"].get(key)] += int(row["count"])
+        return counts[hour], [counts[prior] if prior is not None else {} for prior in references]
 
     def first_event(self, site: ObjectId) -> pd.Timestamp | None:
         document = self.db.events.find_one({"site": site}, {"ts": 1}, sort=[("ts", ASCENDING)])

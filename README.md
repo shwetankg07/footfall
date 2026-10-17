@@ -1,6 +1,6 @@
 # Footfall
 
-Footfall is web analytics for small websites. You add one line to your site, and Footfall shows who visits, which pages they read, where they came from and where they give up. It also learns each site's normal traffic and tells you when something unusual happens. It does all of this without cookies and without storing anyone's IP address.
+Footfall is web analytics for small websites, run as a freemium SaaS. You add one line to your site, and the dashboard shows who visits, which pages they read, where they came from and where they give up, free and without cookies. Footfall Pro adds Intelligence: models that learn each site's normal traffic, alert you when it breaks, explain what caused it, find which visitors convert better, and rank what's worth fixing.
 
 - Dashboard: https://footfall-sigma.vercel.app
 - Source: https://github.com/shwetankg07/footfall
@@ -15,19 +15,34 @@ If you run a portfolio, a side project or a small shop, you want to know whether
 
 Students, indie developers and small teams with one or a few websites, a few to a few thousand visits a day, and no time to set up an analytics stack. Most of them get a handful of visits an hour, which is exactly the range where "is this normal?" is hard to answer by eye.
 
+## Plans
+
+| | Free | Pro (₹499 / month or ₹4,990 / year) |
+|---|---|---|
+| Sites | 3 | Unlimited |
+| History | Last 30 days | Everything |
+| Dashboard, live visitors, funnels, team, share links | Yes | Yes |
+| Forecasts and spike/drop alerts | | Yes |
+| "Why it changed" on every alert | | Yes |
+| Conversion drivers on every funnel | | Yes |
+| Weekly opportunities feed | | Yes |
+
+Every new account gets 14 days of Pro. Payments go through Razorpay (test mode in this deployment). One payment buys 30 or 365 days, with no auto-renewal. A second payment adds its days to the end of the current period. The server only extends Pro after it checks Razorpay's signature, and each payment can only be applied once. When Pro lapses, nothing is deleted: the site drops back to the free limits and Intelligence pauses.
+
 ## Solution
 
 A one-line script sends a tiny beacon for each page view. The server turns the visitor into an anonymous code that changes every day, stores the event, and pushes the live visitor count to anyone watching the dashboard. The dashboard answers the questions people actually ask: how many people came, from where, on what device, which pages, and how many made it through the steps that matter (a funnel). Every hour, a Python job learns each site's weekly rhythm and predicts a normal range for the next 24 hours. When an hour lands far outside that range, everyone on the site gets an alert.
 
 ## Key features
 
-These are the five workflows, each working end to end:
+These are the workflows, each working end to end:
 
 1. **Add a site.** Sign up, add your domain, paste the snippet. The dashboard waits for the first visit and switches over by itself the moment it arrives.
 2. **See your traffic.** Unique visitors, page views, views per visitor and bounce rate for the last 24 hours, 7, 30 or 90 days, each compared with the period before. Charts per hour or per day in the site's timezone, top pages, sources, devices, browsers, countries and custom events, plus a live count of who is on the site right now.
 3. **Funnels.** Define 2 to 6 steps (pages, page prefixes like `/product/*`, or custom events like `paid`). Footfall counts visitors who complete the steps in order and shows where they drop off.
 4. **Teams and sharing.** Invite teammates as admins or viewers with single-use invite links, change roles, remove people, or leave a site. Turn on a public read-only dashboard link, replace it, or turn it off.
-5. **Forecasts and alerts.** An hourly ML job forecasts the normal range of page views for each site and flags spikes and drops. Alerts appear instantly in the dashboard (bell, toast and on the chart) and can also be emailed.
+5. **Intelligence (Pro).** An hourly ML job forecasts each site's normal range of page views and flags spikes and drops. Each alert says what caused it, for example "82% came from news.ycombinator.com", or that every segment fell together, which suggests an outage. A daily job finds which visitors convert better or worse in each funnel, using odds ratios, Fisher tests and a false-discovery correction. It also builds a ranked list of opportunities: leaky entry pages, strong sources, weak devices, peak hours and next week's forecast. Alerts appear instantly in the dashboard and can also be emailed.
+6. **Plans and billing.** Free and Pro plans, a 14-day trial, Razorpay checkout, and locked Pro features that explain what you'd get.
 
 ## Tech stack
 
@@ -39,6 +54,7 @@ These are the five workflows, each working end to end:
 | Live updates | Socket.io | Live visitor count, "installed" signal, alert notifications |
 | Dashboard | React 19, Vite, Redux Toolkit, React Router | Redux holds what several screens share (login, sites, alerts, toasts) |
 | Charts | Hand-written SVG | Full control over the forecast band, hover crosshair, keyboard reading and table view |
+| Payments | Razorpay (test mode) | Checkout in the browser, signature check on the server |
 | ML | Python 3.12, pandas, statsmodels, scipy, scikit-learn | The usual tools for time series and evaluation |
 | Hosting | Vercel (dashboard), Render (API), Atlas (database), GitHub Actions (ML job and keep-awake ping) | All free tiers |
 
@@ -101,6 +117,13 @@ Four methods were compared in a walk-forward backtest on synthetic traffic at th
 
 The seasonal profile is a smoothed hour-of-week profile with recency weighting and a level adjustment. It won on both forecast error and F1. Boosting caught slightly more anomalies but raised 57 false alarms to its 5. The full method, the per-traffic-level results and the limits of a synthetic benchmark are in [`ml/README.md`](ml/README.md) and [`ml/reports/backtest.md`](ml/reports/backtest.md).
 
+The other Pro features are built on the same data:
+- **Why it changed.** For each alert hour, every source, page, device, country and browser is compared with the same hour in the previous weeks. The causes are the segments whose share of the change is far above their usual share of traffic. When everything moved in proportion, the alert is marked site-wide instead, which usually means an outage. Alerts only start once a site has two weeks of history.
+- **Conversion drivers.** For each funnel, every visitor attribute with at least 30 visitors on both sides gets a 2x2 table, an odds ratio with a 95% interval, and a Fisher exact test. A Benjamini-Hochberg correction is applied across all of them. In 500 simulated funnels with no real effect, 7.4% showed a false driver, against a 10% target. A true 2x effect is found every time at 1,000 visitors, and about half the time at 200 ([`ml/reports/drivers.md`](ml/reports/drivers.md)).
+- **Opportunities.** Leaky entry pages, strong sources and weak devices are each tested against the site average with a minimum sample, then ranked by the extra engaged visitors a week they could bring. Peak hours and next week's forecast come from the seasonal model.
+
+On the seeded demo (28 days, with two source-driven spikes and a 3-hour outage planted), the hourly job raised exactly those 6 anomalous hours and nothing else. It traced the spikes to news.ycombinator.com and linkedin.com and marked the outage site-wide.
+
 ### Security decisions
 
 - Passwords are hashed with bcrypt. The login JWT lives in an httpOnly cookie.
@@ -157,7 +180,7 @@ export MONGO_URI=mongodb://127.0.0.1:27017 MONGO_DB=footfall API_URL=http://loca
 
 - `cd server && npm test` starts the real API against an in-memory MongoDB and walks every workflow: sign-up, sites and roles, collection (including bots, forged origins and IP privacy), stats, funnels, invite links, share links, sockets, forecasts, alerts and deletion.
 - `node utils/funnel.check.js` and `node utils/timeBuckets.check.js` check the funnel order rules and the DST-safe buckets.
-- `cd ml && .venv/bin/python -m pytest` runs 45 tests on the generator, models, detector, backtest, data layer, scorer and seeder.
+- `cd ml && .venv/bin/python -m pytest` runs 118 tests: generator, models, detector, backtest, root cause, funnel matching, conversion drivers, opportunities, plan gating, the data layer, the scorer, the daily insights job, and a replay of the seeded demo.
 
 ## Environment variables
 
@@ -172,6 +195,7 @@ export MONGO_URI=mongodb://127.0.0.1:27017 MONGO_DB=footfall API_URL=http://loca
 | `INTERNAL_SECRET` | yes | Shared with the ML job for `POST /internal/alerts/flush` |
 | `RESEND_API_KEY` | no | Alert emails through Resend; without it, alerts only show in the dashboard |
 | `ALERT_FROM_EMAIL` | no | Sender for alert emails |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | no | Razorpay keys for Pro checkout; without them the app runs and checkout says payments aren't set up |
 | `NODE_ENV` | prod | `production` turns on `Secure` cookies |
 | `PORT` | no | Default 8080 |
 

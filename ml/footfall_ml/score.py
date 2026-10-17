@@ -15,10 +15,12 @@ from bson import ObjectId
 from .data import MongoRepository, Repository, alert_document, parse_site_id
 from .detect import detect
 from .models import Forecast, MODEL_TYPES, make_model
+from .rca import explain_change
 from .time import DEFAULT_TIMEZONE, floor_hour, utc
 
 LOG = logging.getLogger(__name__)
 SELECTION_FILE = Path(__file__).with_name("selection.json")
+MIN_ALERT_HISTORY_DAYS = 14
 
 
 def production_model() -> str:
@@ -67,6 +69,9 @@ def score_site(
     stored = repository.forecasts(site_id, hours)
     alerts = 0
     for hour in hours:
+        if hour - first < pd.Timedelta(days=MIN_ALERT_HISTORY_DAYS):
+            LOG.info("site %s alert skipped at %s: under %s days of history", site_id, hour, MIN_ALERT_HISTORY_DAYS)
+            continue
         row = stored.get(hour)
         dispersion = None
         rule = "count"
@@ -81,6 +86,13 @@ def score_site(
         decision = detect(int(history.loc[hour]), float(row["expected"]), float(row["lo"]), float(row["hi"]), dispersion, rule=rule)
         if decision:
             document = alert_document(site_id, hour, int(history.loc[hour]), row, decision.kind, decision.score, now)
+            try:
+                actual_segments, previous_segments = repository.alert_segments(site_id, hour, first, timezone)
+                drivers, broad = explain_change(actual_segments, previous_segments, decision.kind)
+            except Exception:
+                LOG.exception("site %s alert attribution unavailable at %s", site_id, hour)
+                drivers, broad = [], False
+            document.update(drivers=drivers, broad=broad)
             if dry_run:
                 LOG.info("dry-run alert: site=%s hour=%s kind=%s actual=%s expected=%.2f", site_id, hour, decision.kind, history.loc[hour], row["expected"])
             elif repository.insert_alert(document):
@@ -105,7 +117,7 @@ def run(
     if backfill_days < 0:
         raise ValueError("backfill days cannot be negative")
     now = utc(now)
-    sites = repository.sites(site_id)
+    sites = repository.intelligence_sites(now, site_id)
     if not sites:
         LOG.warning("no matching sites found")
     forecasts, alerts = 0, 0

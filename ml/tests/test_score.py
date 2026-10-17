@@ -6,7 +6,7 @@ import pytest
 from bson import ObjectId
 
 from footfall_ml.models import Forecast
-from footfall_ml.score import flush_alerts, main, run
+from footfall_ml.score import MIN_ALERT_HISTORY_DAYS, flush_alerts, main, run
 from footfall_ml.time import DEFAULT_TIMEZONE, floor_hour
 
 
@@ -23,6 +23,12 @@ class FakeRepository:
 
     def sites(self, site=None):
         return [s for s in self.site_rows if site is None or s["_id"] == site]
+
+    def intelligence_sites(self, now, site=None):
+        return self.sites(site)
+
+    def alert_segments(self, site, hour, first, timezone):
+        return {}, []
 
     def first_event(self, site):
         return self.first
@@ -77,6 +83,37 @@ def test_rerun_is_idempotent_and_preserves_stored_band_and_alert_status():
     future = [hour for site, hour in repository.bands if hour > floor_hour(now)]
     assert len(future) == 24
     assert min(future) == floor_hour(now) + pd.Timedelta(hours=1)
+
+
+@pytest.mark.parametrize("days,hours", [(7, 0), (7, 6), (10, 6), (13, 6)])
+def test_forecasts_start_at_seven_days_but_warmup_spikes_cannot_alert(days, hours, caplog):
+    repository = FakeRepository()
+    cutoff = repository.first + pd.Timedelta(days=days, hours=hours)
+    completed = pd.date_range(cutoff - pd.Timedelta(hours=3), periods=3, freq="h")
+    for hour in completed:
+        repository.counts.loc[hour] = 100
+        repository.bands[(repository.site_id, hour)] = {"expected": 20.0, "lo": 2.0, "hi": 50.0, "model": "seasonal_profile"}
+    with caplog.at_level("INFO"):
+        written, alerts = run(repository, cutoff + pd.Timedelta(minutes=7), model_name="seasonal_profile")
+    assert written == 24 and alerts == 0
+    assert repository.alerts == {}
+    assert "under 14 days of history" in caplog.text
+
+
+@pytest.mark.parametrize("first_offset_minutes,expected_alerts", [(0, 2), (10, 1)])
+def test_alert_warmup_is_checked_before_each_target_hour(first_offset_minutes, expected_alerts):
+    assert MIN_ALERT_HISTORY_DAYS == 14
+    repository = FakeRepository()
+    beginning = repository.first
+    repository.first += pd.Timedelta(minutes=first_offset_minutes)
+    cutoff = beginning + pd.Timedelta(days=14, hours=2)
+    completed = pd.date_range(cutoff - pd.Timedelta(hours=3), periods=3, freq="h")
+    for hour in completed:
+        repository.counts.loc[hour] = 100
+        repository.bands[(repository.site_id, hour)] = {"expected": 20.0, "lo": 2.0, "hi": 50.0, "model": "seasonal_profile"}
+    _, alerts = run(repository, cutoff + pd.Timedelta(minutes=7), model_name="seasonal_profile")
+    assert alerts == expected_alerts
+    assert sorted(pd.Timestamp(row["hour"]) for row in repository.alerts.values()) == list(completed[-expected_alerts:])
 
 
 def test_fallback_fits_strictly_before_each_target_and_checks_all_three(monkeypatch):
@@ -209,3 +246,19 @@ def test_flush_request_and_failure_retry(caplog):
     assert request.data == b"{}" and request.method == "POST" and timeout == 10
     assert request.get_header("X-internal-secret") == "test-secret"
     assert "retried next run" in caplog.text
+
+
+def test_attribution_failure_keeps_the_alert_with_empty_drivers(caplog):
+    repository = FakeRepository()
+    repository.counts.iloc[-1] = 100
+
+    def unavailable(*args):
+        raise RuntimeError("segment query failed")
+
+    repository.alert_segments = unavailable
+    now = repository.counts.index[-1] + pd.Timedelta(hours=1)
+    _, alerts = run(repository, now, model_name="seasonal_profile")
+    assert alerts == 1
+    alert = next(iter(repository.alerts.values()))
+    assert alert["drivers"] == [] and alert["broad"] is False
+    assert "attribution unavailable" in caplog.text
