@@ -1,15 +1,90 @@
 import { useMemo, useRef, useState } from "react";
 import { useDispatch } from "react-redux";
-import { useOutletContext, useSearchParams } from "react-router-dom";
+import { Link, useOutletContext, useSearchParams } from "react-router-dom";
+import Icon from "../components/Icon";
 import { useApi } from "../hooks/useApi";
 import { api } from "../services/api";
 import { addToast } from "../store/toastSlice";
-import { formatCount } from "../utils/format";
+import { formatCount, timeAgo } from "../utils/format";
 import { RANGES, rangeQuery } from "../utils/range";
 
 const clampPercent = (value) => Math.min(100, Math.max(0, Number(value) || 0));
 const percent = (value) => `${Number(clampPercent(value).toFixed(1))}%`;
 const stepLabel = (step) => step.kind === "page" ? `Visited ${step.value}` : `Event: ${step.value}`;
+const countryNames = new Intl.DisplayNames(["en"], { type: "region" });
+const count = new Intl.NumberFormat("en-IN");
+const conversionRate = new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 1 });
+const multiplier = new Intl.NumberFormat("en", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+
+function driverSubject({ dimension, value }) {
+  switch (dimension) {
+    case "referrer": return value ? `Visitors from ${value}` : "Visitors on direct visits";
+    case "path": return value ? `Visitors who land on ${value}` : "Visitors with an unknown landing page";
+    case "country": {
+      const code = String(value ?? "").toUpperCase();
+      return value ? `Visitors from ${/^[A-Z]{2}$/.test(code) ? countryNames.of(code) : value}` : "Visitors with an unknown country";
+    }
+    case "browser": return value ? `Visitors using ${value}` : "Visitors with an unknown browser";
+    case "device": {
+      const devices = { mobile: "Mobile visitors", desktop: "Desktop visitors", tablet: "Tablet visitors" };
+      return devices[String(value).toLowerCase()] ?? (value ? `Visitors using ${value}` : "Visitors with an unknown device");
+    }
+    default: return "These visitors";
+  }
+}
+
+function DriversLocked() {
+  return (
+    <div className="row spread">
+      <div className="row" style={{ flex: "1 1 220px", flexWrap: "nowrap", alignItems: "flex-start" }}>
+        <Icon name="lock" style={{ flex: "none", marginTop: 2 }} />
+        <p className="ink-2 small">See which visitors convert better: Footfall Pro</p>
+      </div>
+      <Link to="/billing" className="btn small">Upgrade</Link>
+    </div>
+  );
+}
+
+function ProConversionDrivers({ base, funnelId }) {
+  const result = useApi(`${base}/funnels/${funnelId}/drivers`);
+  const computed = result.data?.drivers;
+
+  if (result.error?.status === 402) return <DriversLocked />;
+  if (result.error) return (
+    <div className="stack">
+      <p className="form-error" role="alert">Couldn't load conversion drivers. {result.error.message} Try loading them again.</p>
+      <div className="row"><button type="button" className="btn small" disabled={result.loading} onClick={result.reload}>{result.loading ? "Loading…" : "Retry loading drivers"}</button></div>
+    </div>
+  );
+  if (!result.data) return (
+    <div className="stack" aria-busy="true">
+      <p className="muted small" role="status">Loading conversion drivers…</p>
+      <div className="skeleton" style={{ height: 44 }} />
+    </div>
+  );
+  if (!computed) return <p className="muted small">Conversion drivers are worked out once a day from the last 30 days. Check back tomorrow.</p>;
+
+  return (
+    <div className="stack" aria-busy={result.loading}>
+      {computed.drivers.length === 0 ? (
+        <p className="muted small">No visitor group converts noticeably better or worse than the rest yet (based on {count.format(computed.entered)} visitors who started this funnel).</p>
+      ) : (
+        <div className="drivers">
+          {computed.drivers.map((driver) => (
+            <div className="driver" key={`${driver.dimension}:${driver.value}`} style={{ alignItems: "flex-start", padding: "10px 0" }}>
+              <Icon name={driver.direction === "better" ? "trendUp" : "trendDown"} style={{ color: driver.direction === "better" ? "var(--good-ink)" : "var(--critical-ink)", flex: "none", marginTop: 2 }} />
+              <div className="stack" style={{ gap: 4, minWidth: 0, overflowWrap: "anywhere" }}>
+                <p>{driverSubject(driver)} finish this funnel <strong className="num">{multiplier.format(driver.oddsRatio)}x</strong> as often</p>
+                <p className="muted small num">{conversionRate.format(driver.rate)} vs {conversionRate.format(driver.restRate)} for everyone else · {count.format(driver.entered)} visitors · 95% range {multiplier.format(driver.ciLow)}x to {multiplier.format(driver.ciHigh)}x</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="muted small num">Updated <time dateTime={computed.computedAt} title={new Date(computed.computedAt).toLocaleString("en-IN")}>{timeAgo(computed.computedAt)}</time> · based on {count.format(computed.entered)} visitors in the last 30 days</p>
+    </div>
+  );
+}
 
 function NewFunnel({ base, onCreated, onCancel }) {
   const dispatch = useDispatch();
@@ -106,7 +181,7 @@ function NewFunnel({ base, onCreated, onCancel }) {
   );
 }
 
-function FunnelResult({ base, funnel, query, canManage, onDeleted }) {
+function FunnelResult({ base, funnel, query, plan, canManage, onDeleted }) {
   const dispatch = useDispatch();
   const result = useApi(`${base}/funnels/${funnel._id}?${query}`);
   const [confirming, setConfirming] = useState(false);
@@ -200,6 +275,12 @@ function FunnelResult({ base, funnel, query, canManage, onDeleted }) {
           </details>
         </>
       )}
+      <section className="stack" aria-labelledby="conversion-drivers-title" style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+        <h3 id="conversion-drivers-title">What drives conversion</h3>
+        {plan === "pro" || plan === "trial"
+          ? <ProConversionDrivers key={`${base}:${funnel._id}`} base={base} funnelId={funnel._id} />
+          : <DriversLocked />}
+      </section>
     </section>
   );
 }
@@ -265,7 +346,7 @@ function SiteFunnels({ site }) {
           </div>
         )}
       </section>
-      {selected && <FunnelResult key={selected._id} base={base} funnel={selected} query={query} canManage={canManage} onDeleted={(id) => {
+      {selected && <FunnelResult key={selected._id} base={base} funnel={selected} query={query} plan={site.plan} canManage={canManage} onDeleted={(id) => {
         setDeletedIds((current) => [...current, id]);
         setSelectedId(null);
         list.reload();
