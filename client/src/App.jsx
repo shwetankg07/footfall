@@ -15,6 +15,8 @@ import Funnels from "./pages/Funnels";
 import Insights from "./pages/Insights";
 import Settings from "./pages/Settings";
 import Share from "./pages/Share";
+import Pricing from "./pages/Pricing";
+import Billing from "./pages/Billing";
 import NotFound from "./pages/NotFound";
 
 export default function App() {
@@ -31,9 +33,11 @@ export default function App() {
         <Route path="/login" element={<Auth mode="login" />} />
         <Route path="/register" element={<Auth mode="register" />} />
         <Route path="/share/:token" element={<Share />} />
+        <Route path="/pricing" element={<Pricing />} />
         <Route element={<RequireAuth><Layout /></RequireAuth>}>
           <Route path="/invite/:token" element={<Invite />} />
           <Route path="/sites" element={<Sites />} />
+          <Route path="/billing" element={<Billing />} />
           <Route path="/sites/:siteId" element={<SiteLayout />}>
             <Route index element={<Overview />} />
             <Route path="funnels" element={<Funnels />} />
