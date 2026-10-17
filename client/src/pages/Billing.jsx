@@ -228,7 +228,7 @@ export default function Billing() {
             )}
           </div>
           {busy && <p className="muted small" role="status">{busy}</p>}
-          <p className="muted small">Test mode: use card <span className="num">4111 1111 1111 1111</span>, any future date, any CVV, or Netbanking and choose Success.</p>
+          <p className="muted small">Test mode: use card <span className="num">4100 2800 0000 1007</span>, any future date, any CVV, or Netbanking and choose Success.</p>
         </section>
 
         <section className="card" aria-labelledby="payment-history-title">

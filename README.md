@@ -10,7 +10,7 @@ Footfall is web analytics for small websites, run as a freemium SaaS. You add on
 
 The demo shop holds 28 days of generated traffic, clearly a demo: two source-driven spikes and a 3-hour outage are planted in it, so the Intelligence page has something real to find. Sign up with any email to get your own account, starting on the 14-day Pro trial.
 
-To try a payment, open Plan and billing and pay in Razorpay test mode. Use card `4111 1111 1111 1111` with any future date and any CVV, or choose Netbanking, any bank, then Success. No real money moves.
+To try a payment, open Plan and billing and pay in Razorpay test mode. Use card `4100 2800 0000 1007` with any future date and any CVV, or choose Netbanking, any bank, then Success. No real money moves.
 
 The API runs on Render's free tier. A scheduled ping keeps it awake from 05:30 to 00:30 IST. Outside those hours the first request can take up to a minute.
 

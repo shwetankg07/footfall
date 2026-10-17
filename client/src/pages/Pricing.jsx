@@ -124,7 +124,7 @@ export default function Pricing() {
           {[
             ["Is the free plan really free?", "Yes. No card, no time limit. Track up to 3 sites and see the last 30 days of history."],
             ["What happens after the trial?", "Your account moves to Free. Nothing is deleted. Footfall Intelligence pauses, and your dashboard shows the last 30 days. Pay for Pro whenever you want to resume Intelligence and access full history."],
-            ["How does billing work?", "A payment buys 30 or 365 days of Pro. There is no auto-renewal; pay again to extend your time. In test mode, use Razorpay test card 4111 1111 1111 1111 with any future date and any CVV, or choose Netbanking and then Success."],
+            ["How does billing work?", "A payment buys 30 or 365 days of Pro. There is no auto-renewal; pay again to extend your time. In test mode, use Razorpay test card 4100 2800 0000 1007 with any future date and any CVV, or choose Netbanking and then Success."],
             ["Do you use cookies?", "No. Each visitor becomes an anonymous daily code, so we can count visits without cookies."],
           ].map(([question, answer]) => (
             <details className="table-view" key={question}>
