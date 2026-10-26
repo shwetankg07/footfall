@@ -5,7 +5,7 @@ Footfall is web analytics for small websites, run as a freemium SaaS. You add on
 - App: https://footfall-sigma.vercel.app
 - Live demo, no login: https://footfall-sigma.vercel.app/share/cRYdX41uOw17y8mhwVMHL8em
 - Demo login (Pro, with a seeded shop): `demo@example.com` / `footfall-demo`
-- API: https://footfall-ebpq.onrender.com/health
+- API: https://footfall-api-zhmw.onrender.com/health
 - Source: https://github.com/shwetankg07/footfall
 
 The demo shop holds 28 days of generated traffic, clearly a demo: two source-driven spikes and a 3-hour outage are planted in it, so the Intelligence page has something real to find. Sign up with any email to get your own account, starting on the 14-day Pro trial.
