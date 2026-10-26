@@ -12,7 +12,7 @@ The demo shop holds 28 days of generated traffic, clearly a demo: two source-dri
 
 To try a payment, open Plan and billing and pay in Razorpay test mode. Use card `4100 2800 0000 1007` with any future date and any CVV, or choose Netbanking, any bank, then Success. No real money moves.
 
-The API runs on Render's free tier. A scheduled ping keeps it awake from 05:30 to 00:30 IST. Outside those hours the first request can take up to a minute.
+The API runs on Render's free tier, which sleeps after 15 idle minutes. A cron-job.org ping hits `/health` every 5 minutes so it stays awake.
 
 ## Problem
 
@@ -63,7 +63,7 @@ These are the workflows, each working end to end:
 | Charts | Hand-written SVG | Full control over the forecast band, hover crosshair, keyboard reading and table view |
 | Payments | Razorpay (test mode) | Checkout in the browser, signature check on the server |
 | ML | Python 3.12, pandas, statsmodels, scipy, scikit-learn | The usual tools for time series and evaluation |
-| Hosting | Vercel (dashboard), Render (API), Atlas (database), GitHub Actions (ML job and keep-awake ping) | All free tiers |
+| Hosting | Vercel (dashboard), Render (API), Atlas (database), GitHub Actions (ML job), cron-job.org (keep-awake ping) | All free tiers |
 
 ## Architecture
 
@@ -129,7 +129,7 @@ The other Pro features are built on the same data:
 - **Conversion drivers.** For each funnel, every visitor attribute with at least 30 visitors on both sides gets a 2x2 table, an odds ratio with a 95% interval, and a Fisher exact test. A Benjamini-Hochberg correction is applied across all of them. In 500 simulated funnels with no real effect, 7.4% showed a false driver, against a 10% target. A true 2x effect is found every time at 1,000 visitors, and about half the time at 200 ([`ml/reports/drivers.md`](ml/reports/drivers.md)).
 - **Opportunities.** Leaky entry pages, strong sources and weak devices are each tested against the site average with a minimum sample, then ranked by the extra engaged visitors a week they could bring. Peak hours and next week's forecast come from the seasonal model.
 
-On the seeded demo (28 days, with two source-driven spikes and a 3-hour outage planted), the hourly job raised exactly those 6 anomalous hours and nothing else. It traced the spikes to news.ycombinator.com and linkedin.com and marked the outage site-wide.
+On the seeded demo (28 days, with two source-driven spikes and a 3-hour outage planted), the hourly job raised exactly those 7 anomalous hours and nothing else. It traced the spikes to news.ycombinator.com and linkedin.com and marked the outage site-wide.
 
 ### Security decisions
 
@@ -215,7 +215,8 @@ export MONGO_URI=mongodb://127.0.0.1:27017 MONGO_DB=footfall API_URL=http://loca
 - **API on Render.** `render.yaml` is a blueprint: New → Blueprint → this repo. It builds `server/` with `npm ci --omit=dev`, checks `/health`, and generates `JWT_SECRET`. You fill in `MONGO_URI`, `INTERNAL_SECRET` and `CLIENT_URL` (the Vercel address).
 - **Dashboard on Vercel.** Root directory `client`, with `VITE_API_URL` set to the Render address. `client/vercel.json` rewrites `/api/*` to the Render API (so cookies stay first-party) and every other path to `index.html`.
 - **Database on MongoDB Atlas.** Free M0 cluster. Network access must allow Render and GitHub Actions (both use changing IPs).
-- **ML job and keep-awake ping on GitHub Actions.** `.github/workflows/ml-score.yml` runs at :35 every hour, just after an IST hour closes. `keep-awake.yml` pings `/health` every 10 minutes so page views aren't lost while Render wakes up. Both need the secrets and variables listed above.
+- **ML job on GitHub Actions.** `.github/workflows/ml-score.yml` runs at :35 every hour, just after an IST hour closes, and needs the secrets and variables listed above. GitHub runs scheduled workflows on a best-effort basis, so under load a run can be late or skipped; the next one catches up.
+- **Keep-awake ping on cron-job.org.** A free job sends `GET /health` every 5 minutes so Render's free tier never sleeps and page views aren't lost while it wakes up. GitHub's scheduler was too irregular for this, so it moved off Actions.
 
 ## API
 

@@ -8,6 +8,8 @@ export default function Overview() {
 
   return (
     <TrafficView
+      // Remount when the first visit lands so the numbers refetch instead of staying at zero.
+      key={site.installed ? "installed" : "waiting"}
       apiBase={base}
       forecastPath={site.plan === "free" ? undefined : `${base}/forecast`}
       timezone={site.timezone}

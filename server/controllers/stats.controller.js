@@ -18,7 +18,8 @@ export const statsFor = async (site, query, plan) => {
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.stats;
 
   const stats = await siteStats(site, range);
-  cache.set(key, { stats, at: Date.now() });
+  // An empty range is cheap and may fill any second (a site's first visit), so don't pin the zeros.
+  if (stats.summary.visitors) cache.set(key, { stats, at: Date.now() });
   if (cache.size > 500) cache.delete(cache.keys().next().value);
   return stats;
 };
