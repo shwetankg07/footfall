@@ -13,6 +13,8 @@
       try {
         var t = localStorage.getItem("footfall-theme");
         if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        // The landing page is always black; don't flash the light theme while it loads.
+        if (location.pathname === "/") document.documentElement.style.background = "#000";
       } catch (e) {}
     </script>
     <title>Footfall</title>

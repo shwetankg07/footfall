@@ -61,6 +61,7 @@ These are the workflows, each working end to end:
 | Live updates | Socket.io | Live visitor count, "installed" signal, alert notifications |
 | Dashboard | React 19, Vite, Redux Toolkit, React Router | Redux holds what several screens share (login, sites, alerts, toasts) |
 | Charts | Hand-written SVG | Full control over the forecast band, hover crosshair, keyboard reading and table view |
+| Landing page | Canvas 2D scene, GSAP (ScrollTrigger, SplitText, DrawSVG) | One drawn scene shows the idea, people walking in and being counted; GSAP times the intro and the scroll |
 | Payments | Razorpay (test mode) | Checkout in the browser, signature check on the server |
 | ML | Python 3.12, pandas, statsmodels, scipy, scikit-learn | The usual tools for time series and evaluation |
 | Hosting | Vercel (dashboard), Render (API), Atlas (database), GitHub Actions (ML job), cron-job.org (keep-awake ping) | All free tiers |
