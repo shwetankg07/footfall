@@ -8,7 +8,7 @@ Footfall is web analytics for small websites, run as a freemium SaaS. You add on
 - API: https://footfall-api-zhmw.onrender.com/health
 - Source: https://github.com/shwetankg07/footfall
 
-The demo shop holds 28 days of generated traffic, clearly a demo: two source-driven spikes and a 3-hour outage are planted in it, so the Intelligence page has something real to find. Sign up with any email to get your own account, starting on the 14-day Pro trial.
+The demo shop holds 28 days of generated traffic, clearly a demo: two source-driven spikes and a 3-hour outage are planted in it, so the Intelligence page has something real to find. A nightly job rebuilds it, so its 28 days always end today. Sign up with any email to get your own account, starting on the 14-day Pro trial.
 
 To try a payment, open Plan and billing and pay in Razorpay test mode. Use card `4100 2800 0000 1007` with any future date and any CVV, or choose Netbanking, any bank, then Success. No real money moves.
 
@@ -130,7 +130,7 @@ The other Pro features are built on the same data:
 - **Conversion drivers.** For each funnel, every visitor attribute with at least 30 visitors on both sides gets a 2x2 table, an odds ratio with a 95% interval, and a Fisher exact test. A Benjamini-Hochberg correction is applied across all of them. In 500 simulated funnels with no real effect, 7.4% showed a false driver, against a 10% target. A true 2x effect is found every time at 1,000 visitors, and about half the time at 200 ([`ml/reports/drivers.md`](ml/reports/drivers.md)).
 - **Opportunities.** Leaky entry pages, strong sources and weak devices are each tested against the site average with a minimum sample, then ranked by the extra engaged visitors a week they could bring. Peak hours and next week's forecast come from the seasonal model.
 
-On the seeded demo (28 days, with two source-driven spikes and a 3-hour outage planted), the hourly job raised exactly those 7 anomalous hours and nothing else. It traced the spikes to news.ycombinator.com and linkedin.com and marked the outage site-wide.
+The seeded demo has 28 days of traffic with a Hacker News spike, a LinkedIn spike and a 3-hour outage, planted at fixed local times so every nightly rebuild tells the same story. Replayed at eight different rebuild times, the hourly job flagged both campaigns every time and traced every flagged campaign hour to its source, news.ycombinator.com or linkedin.com. It caught all three outage hours and marked them site-wide every time, and raised 0 to 2 other alerts per run, mostly small night-time bumps. `ml/tests/test_insights.py` replays four of those rebuild times on every test run.
 
 ### Security decisions
 
@@ -180,7 +180,7 @@ The ML part, with demo data for a site you created:
 cd ml
 uv venv --python 3.12 .venv && uv pip install -r requirements.txt
 export MONGO_URI=mongodb://127.0.0.1:27017 MONGO_DB=footfall API_URL=http://localhost:8080 INTERNAL_SECRET=<same as server>
-.venv/bin/python -m footfall_ml.seed_demo --site <site id> --days 28 --replace
+.venv/bin/python -m footfall_ml.seed_demo --site <site id> --days 28 --reset
 .venv/bin/python -m footfall_ml.score --site <site id> --backfill-days 21
 ```
 
@@ -188,7 +188,7 @@ export MONGO_URI=mongodb://127.0.0.1:27017 MONGO_DB=footfall API_URL=http://loca
 
 - `cd server && npm test` starts the real API against an in-memory MongoDB and walks every workflow: sign-up, sites and roles, collection (including bots, forged origins and IP privacy), stats, funnels, invite links, share links, sockets, forecasts, alerts and deletion.
 - `node utils/funnel.check.js` and `node utils/timeBuckets.check.js` check the funnel order rules and the DST-safe buckets.
-- `cd ml && .venv/bin/python -m pytest` runs 118 tests: generator, models, detector, backtest, root cause, funnel matching, conversion drivers, opportunities, plan gating, the data layer, the scorer, the daily insights job, and a replay of the seeded demo.
+- `cd ml && .venv/bin/python -m pytest` runs 124 tests: generator, models, detector, backtest, root cause, funnel matching, conversion drivers, opportunities, plan gating, the data layer, the scorer, the daily insights job, and replays of the seeded demo at different rebuild times.
 
 ## Environment variables
 
@@ -209,7 +209,7 @@ export MONGO_URI=mongodb://127.0.0.1:27017 MONGO_DB=footfall API_URL=http://loca
 
 **Dashboard** (`client/.env`): `VITE_API_URL` is the API's own address, used for the socket and the tracker snippet. `VITE_DEMO_SHARE_PATH` (optional) is a `/share/<token>` path shown as "See a live demo" on the home page. Vite bakes these in at build time, so redeploy after changing them.
 
-**ML job** (GitHub Actions): secrets `MONGO_URI` and `INTERNAL_SECRET`, repository variable `API_URL`, optional variable `MONGO_DB`.
+**ML job** (GitHub Actions): secrets `MONGO_URI` and `INTERNAL_SECRET`, repository variable `API_URL`, optional variable `MONGO_DB`. The nightly demo rebuild also needs variable `DEMO_SITE_ID`, the demo shop's id.
 
 ## Deployment
 
@@ -217,6 +217,7 @@ export MONGO_URI=mongodb://127.0.0.1:27017 MONGO_DB=footfall API_URL=http://loca
 - **Dashboard on Vercel.** Root directory `client`, with `VITE_API_URL` set to the Render address. `client/vercel.json` rewrites `/api/*` to the Render API (so cookies stay first-party) and every other path to `index.html`.
 - **Database on MongoDB Atlas.** Free M0 cluster. Network access must allow Render and GitHub Actions (both use changing IPs).
 - **ML job on GitHub Actions.** `.github/workflows/ml-score.yml` runs at :35 every hour, just after an IST hour closes, and needs the secrets and variables listed above. GitHub runs scheduled workflows on a best-effort basis, so under load a run can be late or skipped; the next one catches up.
+- **Demo rebuild on GitHub Actions.** `.github/workflows/refresh-demo.yml` runs nightly: `seed_demo --reset --ahead-days 3` replaces the demo shop's events, forecasts, alerts and insights, then a 21-day scoring backfill and the insights job rebuild the Intelligence page. The 3 days of traffic written ahead stay invisible until their time comes (every query stops at now), so the demo stays current even if a nightly run is late or missed.
 - **Uptime ping on cron-job.org.** A free job sends `GET /health` every 5 minutes. On Render's free tier this is what keeps the API awake (it sleeps after 15 idle minutes, and page views sent while it wakes are lost); on Starter it only checks the API is up. GitHub's scheduler was too irregular for this, so it moved off Actions.
 
 ## API

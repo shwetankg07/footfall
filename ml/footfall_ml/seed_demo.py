@@ -23,22 +23,36 @@ def visitor_hash(site: ObjectId, seed: int, person: int, at: pd.Timestamp, timez
     return hashlib.sha256(f"footfall-demo:{site}:{seed}:{person}:{day}".encode()).hexdigest()
 
 
-def demo_traffic(days: int, start: pd.Timestamp, seed: int = 7, timezone: str = DEFAULT_TIMEZONE) -> Traffic:
-    traffic = generate(days=days, level="medium", seed=seed, start=start, timezone=timezone,
-                       anomaly_count=2, anomaly_start_day=max(2, days // 2 + 1), spikes_only=True)
+# The demo tells the same story on every refresh: a campaign spike on a busy afternoon, another on an
+# evening, and a lunchtime outage, at fixed shares of the history in the site's local time. Leaving
+# their timing to chance can drop a spike into the small hours, where it is too faint to explain well.
+# (share of the history, local start hour, hours, kind, factor)
+EVENTS = ((0.6, 15, 2, "spike", 4.5), (0.78, 18, 2, "spike", 4.0), (0.86, 13, 3, "drop", 0.0))
+
+
+def demo_traffic(days: int, start: pd.Timestamp, seed: int = 7, timezone: str = DEFAULT_TIMEZONE, ahead_days: int = 0) -> Traffic:
+    """`days` of history from `start` with two campaigns and an outage, then `ahead_days` of plain traffic."""
+    traffic = generate(days=days + ahead_days, level="medium", seed=seed, start=start, timezone=timezone,
+                       anomalies=False, anomaly_end_day=days)
     frame = traffic.frame.copy()
-    # Choose an afternoon with enough expected traffic and no nearby campaign spike.
-    candidates = [hour for hour in frame.index[max(1, days - 6) * 24 : -4]
-                  if hour.tz_convert(timezone).hour == 13
-                  and not any(window.start - pd.Timedelta(hours=12) <= hour < window.end + pd.Timedelta(hours=12) for window in traffic.windows)]
-    if candidates:
-        hour = candidates[0]
-        outage = AnomalyWindow(hour, hour + pd.Timedelta(hours=3), "drop", 0.0)
-        selected = (frame.index >= outage.start) & (frame.index < outage.end)
-        frame.loc[selected, ["count", "mean"]] = 0
-        frame.loc[selected, "label"] = "drop"
-        return Traffic(frame, tuple(sorted((*traffic.windows, outage), key=lambda window: window.start)))
-    raise ValueError("not enough room for demo campaigns and a separate three-hour outage")
+    local = frame.index.tz_convert(timezone)
+    rng = np.random.default_rng(seed + 1)
+    windows = []
+    for share, hour, hours, kind, factor in EVENTS:
+        day = (pd.Timestamp(start).tz_convert(timezone) + pd.Timedelta(days=round(days * share))).date()
+        at = frame.index[(local.date == day) & (local.hour == hour)]
+        if not len(at) or at[0] + pd.Timedelta(hours=hours) > frame.index[days * 24 - 1]:
+            raise ValueError(f"no room for the demo {kind} at {hour}:00 on {day}")
+        window = AnomalyWindow(at[0], at[0] + pd.Timedelta(hours=hours), kind, factor)
+        selected = (frame.index >= window.start) & (frame.index < window.end)
+        if kind == "spike":
+            frame.loc[selected, "count"] += rng.poisson(frame.loc[selected, "normal_mean"].to_numpy() * (factor - 1))
+        else:
+            frame.loc[selected, "count"] = 0
+        frame.loc[selected, "mean"] = frame.loc[selected, "normal_mean"] * factor
+        frame.loc[selected, "label"] = kind
+        windows.append(window)
+    return Traffic(frame, tuple(windows))
 
 
 def demo_events(site: ObjectId, traffic: Traffic, seed: int = 7, timezone: str = "Asia/Kolkata") -> Iterator[dict[str, Any]]:
@@ -98,10 +112,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--days", type=int, default=28)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--replace", action="store_true", help="delete this site's existing events before inserting")
+    parser.add_argument("--reset", action="store_true", help="like --replace, and also delete the site's forecasts, alerts and insights")
+    parser.add_argument("--ahead-days", type=int, default=0,
+                        help="also write this many days of plain traffic after now, so a demo stays current between refreshes")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     if args.days < 7:
         parser.error("--days must be at least 7")
+    if args.ahead_days < 0:
+        parser.error("--ahead-days cannot be negative")
     uri = os.environ.get("MONGO_URI")
     if not uri:
         LOG.error("MONGO_URI is not set; no demo events written")
@@ -116,14 +135,18 @@ def main(argv: list[str] | None = None) -> int:
         # Generate everything before deleting anything; invalid site timezones cannot lose data.
         timezone = site.get("timezone") or DEFAULT_TIMEZONE
         end = floor_hour(pd.Timestamp.now(tz="UTC"), timezone)
-        traffic = demo_traffic(args.days, end - pd.Timedelta(days=args.days), args.seed, timezone)
+        traffic = demo_traffic(args.days, end - pd.Timedelta(days=args.days), args.seed, timezone, args.ahead_days)
         events = list(demo_events(args.site, traffic, args.seed, timezone))
-        if repository.db.events.find_one({"site": args.site}, {"_id": 1}) and not args.replace:
-            LOG.error("site already has events; use --replace to explicitly replace them")
+        if repository.db.events.find_one({"site": args.site}, {"_id": 1}) and not (args.replace or args.reset):
+            LOG.error("site already has events; use --replace or --reset to explicitly replace them")
             return 1
-        if args.replace:
+        if args.replace or args.reset:
             deleted = repository.db.events.delete_many({"site": args.site}).deleted_count
             LOG.info("removed %s previous events for site %s", deleted, args.site)
+        if args.reset:
+            # Old forecasts and alerts describe the old traffic; the next score run rebuilds them.
+            for name, collection in (("forecasts", repository.db.forecasts), ("alerts", repository.db.alerts), ("insights", repository.db.insights)):
+                LOG.info("removed %s %s for site %s", collection.delete_many({"site": args.site}).deleted_count, name, args.site)
         for offset in range(0, len(events), 1000):
             repository.db.events.insert_many(events[offset : offset + 1000], ordered=False)
         LOG.info("inserted %s events (%s pageviews) for site %s", len(events), int(traffic.frame['count'].sum()), args.site)

@@ -33,6 +33,7 @@ def generate(
     anomaly_count: int = 8,
     anomaly_start_day: int = 21,
     spikes_only: bool = False,
+    anomaly_end_day: int | None = None,
 ) -> Traffic:
     """NB2 traffic: variance = mean + dispersion * mean**2; labels are windows."""
     if days < 1 or dispersion < 0 or anomaly_count < 0 or anomaly_start_day < 0:
@@ -53,16 +54,21 @@ def generate(
     curve /= curve.mean()
     dow = np.array([1.05, 1.10, 1.12, 1.08, 1.00, 0.76, 0.70])[local.dayofweek]
     dow = dow / np.mean([1.05, 1.10, 1.12, 1.08, 1.00, 0.76, 0.70])
-    trend = np.exp(np.linspace(-0.10, 0.10, len(index)))
+    # Days past anomaly_end_day are a plain tail (a demo's days ahead of now). Their random draws come
+    # after the anomalies are picked, so adding a tail never changes the history or its anomalies.
+    history_days = days if anomaly_end_day is None else max(1, min(days, anomaly_end_day))
+    if history_days == days:
+        trend = np.exp(np.linspace(-0.10, 0.10, len(index)))
+    else:
+        # The history's slope, carried on into the tail.
+        trend = np.exp(-0.10 + 0.20 * np.arange(len(index)) / (history_days * 24 - 1))
     # A mild unmodelled daily component prevents perfectly repeating toy data.
-    day_effect = np.repeat(rng.lognormal(-0.5 * 0.07**2, 0.07, days), 24)
-    normal = scale * curve * dow * trend * day_effect
-    rate = normal.copy()
+    day_effect = rng.lognormal(-0.5 * 0.07**2, 0.07, history_days)
     labels = np.full(len(index), "normal", dtype=object)
     windows: list[AnomalyWindow] = []
     first_allowed = anomaly_start_day * 24
     if anomalies and anomaly_count:
-        candidates = np.arange(first_allowed, len(index) - 7)
+        candidates = np.arange(first_allowed, history_days * 24 - 7)
         # Spread windows across the evaluation period, without overlap.
         if len(candidates) < anomaly_count * 12:
             raise ValueError("not enough hours for separated anomaly windows")
@@ -71,9 +77,14 @@ def generate(
             kind = "spike" if spikes_only or number % 2 == 0 else "drop"
             duration = int(rng.integers(1, 4) if kind == "spike" else rng.integers(2, 7))
             factor = float(rng.uniform(3, 6) if kind == "spike" else rng.choice([0.0, 0.05, 0.15]))
-            rate[position : position + duration] *= factor
             labels[position : position + duration] = kind
             windows.append(AnomalyWindow(index[position], index[position + duration], kind, factor))
+    if days > history_days:
+        day_effect = np.concatenate([day_effect, rng.lognormal(-0.5 * 0.07**2, 0.07, days - history_days)])
+    normal = scale * curve * dow * trend * np.repeat(day_effect, 24)
+    rate = normal.copy()
+    for window in windows:
+        rate[(index >= window.start) & (index < window.end)] *= window.factor
     if dispersion == 0:
         count = rng.poisson(rate)
     else:

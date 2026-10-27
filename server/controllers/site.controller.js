@@ -33,10 +33,12 @@ export const listSites = async (req, res) => {
   const me = req.user._id;
   const sites = await Site.find({ $or: [{ owner: me }, { "members.user": me }] }).sort({ createdAt: 1 });
 
-  // Last-24h numbers for every site in one query, for the site cards.
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  // Last-24h numbers for every site in one query, for the site cards. Bounded at now too:
+  // the seeded demo shop holds a few days of traffic dated ahead so it never runs dry.
+  const now = new Date();
+  const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const totals = await Event.aggregate([
-    { $match: { site: { $in: sites.map((site) => site._id) }, ts: { $gte: since }, name: "pageview" } },
+    { $match: { site: { $in: sites.map((site) => site._id) }, ts: { $gte: since, $lt: now }, name: "pageview" } },
     { $group: { _id: "$site", pageviews: { $sum: 1 }, visitors: { $addToSet: "$visitor" } } },
     { $project: { pageviews: 1, visitors: { $size: "$visitors" } } },
   ]);
