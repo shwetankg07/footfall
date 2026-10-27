@@ -179,9 +179,12 @@ export function startDoorway(canvas, slot, { reduced = false, onEnter } = {}) {
     w.wait = scatter ? 0 : rand(0, 2.5);
     w.counted = false;
     // A few looks so the crowd isn't a row of clones.
-    w.hair = Math.random() < 0.35;
-    w.skirt = Math.random() < 0.2;
-    w.bag = Math.random() < 0.25 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+    w.hair = Math.random() < 0.38;
+    w.coat = Math.random() < 0.2;
+    w.skirt = !w.coat && Math.random() < 0.18;
+    w.bag = Math.random() < 0.22 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+    w.hips = w.skirt || w.hair ? rand(1, 1.15) : rand(0.92, 1.04);
+    w.waist = rand(0.88, 1.02);
     if (scatter) {
       // Open the page mid-scene instead of with everyone at the edges.
       const t = rand(0, 0.9);
@@ -254,17 +257,25 @@ export function startDoorway(canvas, slot, { reduced = false, onEnter } = {}) {
     }
   }
 
-  // Pose a walker as a tiny 3D rig and flatten it to screen shapes. Local axes: r to their right,
+  // Pose a walker as a small 3D rig and flatten it to screen shapes. Local axes: r to their right,
   // u up, fw the way they face. Facing away you see a back view; crossing the room, a side view.
+  // Limbs are tapered capsules (a circle at each joint, joined by their tangents), so arms and
+  // legs narrow at the knee, ankle and wrist the way real ones do.
   function pose(w, x, feet, s) {
     const H = w.height;
     const b = w.build;
-    const slope = eye / w.z;
     const side = Math.abs(w.hx);
     const back = Math.abs(w.hz);
-    const at = (r, u, fw) => [x + (r * w.hz + fw * w.hx) * s, feet - u * s - (fw * w.hz - r * w.hx) * s * slope];
-    const sway = 0.012 * H * Math.sin(w.phase);
-    const shapes = { lines: [], torsos: [], quads: [], ovals: [], boxes: [] };
+    // Walkers are drawn upright like cut-outs, so only a hint of each part's depth shows as height.
+    // (The full camera slope would split a side-on body into pieces.)
+    const DEPTH = 0.3;
+    const at = (r, u, fw) => [x + (r * w.hz + fw * w.hx) * s, feet - u * s - (fw * w.hz - r * w.hx) * s * DEPTH];
+    const shapes = [];
+    const cap = (p, r1, q, r2) => shapes.push({ cap: [...at(...p), r1 * s, ...at(...q), r2 * s] });
+
+    // Weight shifts onto the standing leg (hips sway toward it) and the shoulders twist against the hips.
+    const sway = 0.014 * H * Math.sin(w.phase);
+    const twist = 0.025 * H * Math.sin(w.phase);
 
     // Legs: the thigh swings, the knee folds as the leg comes through, and whichever foot is lower holds the floor.
     const thigh = 0.245 * H;
@@ -276,110 +287,122 @@ export function startDoorway(canvas, slot, { reduced = false, onEnter } = {}) {
       return { sideSign, p, a, k, drop: 0.505 * H - thigh * Math.cos(a) - shin * Math.cos(a - k) };
     });
     const hipU = 0.505 * H - Math.min(legs[0].drop, legs[1].drop);
-    for (const { sideSign, a, k } of legs) {
-      const r = sideSign * 0.085 * b;
-      const knee = [r, hipU - thigh * Math.cos(a), thigh * Math.sin(a)];
-      const ankle = [r * 0.94, knee[1] - shin * Math.cos(a - k), knee[2] + shin * Math.sin(a - k)];
-      const toe = [ankle[0], Math.max(0, ankle[1] - 0.03 * H), ankle[2] + 0.13 * H];
-      shapes.lines.push([...at(r + sway, hipU, 0), ...at(...knee), 0.165 * b * s]);
-      shapes.lines.push([...at(...knee), ...at(...ankle), 0.11 * s]);
-      shapes.lines.push([...at(...ankle), ...at(...toe), 0.075 * s]);
+    for (const { sideSign, p, a, k } of legs) {
+      const r = sideSign * 0.08 * b * w.hips + sway;
+      const hip = [r, hipU, -sideSign * twist * 0.4];
+      const knee = [r * 0.96, hipU - thigh * Math.cos(a), hip[2] + thigh * Math.sin(a)];
+      const along = (t) => [knee[0], knee[1] - shin * t * Math.cos(a - k), knee[2] + shin * t * Math.sin(a - k)];
+      const ankle = along(1);
+      // The foot rolls: toe down as the leg swings through, heel first as it lands.
+      const pitch = -0.9 * k + 0.25 * Math.max(0, Math.sin(p));
+      const toe = [ankle[0], Math.max(0.012 * H, ankle[1] - 0.02 * H + 0.1 * H * Math.sin(pitch)), ankle[2] + 0.1 * H * Math.cos(pitch)];
+      const heel = [ankle[0], ankle[1] - 0.012 * H, ankle[2] - 0.022 * H];
+      cap(hip, 0.085 * b, knee, 0.052);
+      cap(knee, 0.052, along(0.32), 0.06);
+      cap(along(0.32), 0.06, ankle, 0.032);
+      cap(heel, 0.035, toe, 0.028);
     }
 
-    // Arms swing against the leg on the same side; the elbow bends more on the forward swing.
-    const shoulderU = 0.815 * H;
+    // Arms swing against the leg on the same side, in a slight arc, the elbow bending more on the forward swing.
+    const shoulderU = 0.8 * H;
     for (const { sideSign, p } of legs) {
-      const c = -0.36 * Math.sin(p);
-      const d = c + 0.22 + 0.4 * Math.max(0, c);
-      const shoulder = [sideSign * 0.185 * b + sway, shoulderU - 0.03 * H, 0];
-      const elbow = [sideSign * 0.2 * b + sway, shoulder[1] - 0.18 * H * Math.cos(c), 0.18 * H * Math.sin(c)];
-      const hand = [sideSign * 0.205 * b + sway, elbow[1] - 0.16 * H * Math.cos(d), elbow[2] + 0.16 * H * Math.sin(d)];
-      shapes.lines.push([...at(...shoulder), ...at(...elbow), 0.1 * b * s]);
-      shapes.lines.push([...at(...elbow), ...at(...hand), 0.08 * s]);
+      const c = -0.38 * Math.sin(p);
+      const d = c + 0.2 + 0.45 * Math.max(0, c);
+      const shoulder = [sideSign * 0.18 * b + sway * 0.4, shoulderU, sideSign * twist];
+      const elbow = [sideSign * (0.2 * b - 0.02 * Math.max(0, c)) + sway * 0.4, shoulderU - 0.18 * H * Math.cos(c), shoulder[2] + 0.18 * H * Math.sin(c)];
+      const wrist = [sideSign * (0.2 * b - 0.04 * Math.max(0, c)) + sway * 0.4, elbow[1] - 0.15 * H * Math.cos(d), elbow[2] + 0.15 * H * Math.sin(d)];
+      const hand = [wrist[0], wrist[1] - 0.045 * H * Math.cos(d), wrist[2] + 0.045 * H * Math.sin(d)];
+      cap(shoulder, 0.062 * b, elbow, 0.043);
+      cap(elbow, 0.043, wrist, 0.031);
+      cap(wrist, 0.033, hand, 0.04);
     }
 
-    // Torso, seen wide from behind and narrow side-on, with sloped shoulders and a waist.
-    const [tx, ty] = at(sway, shoulderU, 0.02 * H);
-    const [bx, by] = at(sway, hipU + 0.02 * H, 0);
-    const hipW = s * b * (0.32 * back + 0.24 * side);
-    shapes.torsos.push([tx, ty, s * b * (0.42 * back + 0.25 * side), bx, by, hipW, 0.035 * H * s]);
-    if (w.skirt) {
-      const [kx, ky] = at(sway, 0.36 * H, 0);
-      shapes.quads.push([bx, by - 0.05 * H * s, hipW, kx, ky, hipW * 1.5]);
-    }
+    // Torso as one smooth outline: neck, sloping shoulders, chest, waist, hips. Each level has a
+    // half-width across the body and a half-depth front to back; on screen it shows whichever the
+    // walker presents, so a side-on body keeps its chest and back. Corners are rounded by drawing a
+    // curve through the midpoints, with the corner points as control points.
+    const lean = 0.035 * H;
+    const band = (levels, flare) => {
+      const rows = levels.map(([u, across, deep]) => {
+        const [cx, cy] = at(sway + (u < 0.45 ? flare : 0), u * H, ((u - 0.45) / 0.42) * lean);
+        return [cx, cy, s * b * (across * back + deep * side)];
+      });
+      return [...rows.map(([cx, cy, half]) => [cx + half, cy]), ...rows.reverse().map(([cx, cy, half]) => [cx - half, cy])];
+    };
+    shapes.push({
+      outline: band([
+        [0.865, 0.06, 0.055], [0.825, 0.16, 0.1], [0.74, 0.175, 0.125], [0.6, 0.135 * w.waist, 0.105], [0.52, 0.16 * w.hips, 0.115],
+        // A coat's hem swings with the walk.
+        ...(w.coat ? [[0.34, 0.2 * w.hips, 0.15], [0.33, 0.06, 0.06]] : [[0.455, 0.15 * w.hips, 0.1], [0.44, 0.03, 0.03]]),
+      ], sway * 0.6),
+    });
+    if (w.skirt) shapes.push({ outline: band([[0.58, 0.14, 0.11], [0.36, 0.26 * w.hips, 0.2]], sway * 0.8) });
     if (w.bag) {
-      const [qx, qy] = at(w.bag * 0.27 * b + sway, 0.52 * H, 0);
-      const [sx0, sy0] = at(w.bag * 0.13 * b + sway, shoulderU + 0.01 * H, 0);
-      shapes.lines.push([sx0, sy0, qx, qy - 0.06 * H * s, 0.025 * s]);
-      shapes.boxes.push([qx, qy, 0.16 * s * (back + 0.5 * side), 0.16 * H * s]);
+      const strapTop = [w.bag * 0.12 * b + sway, shoulderU + 0.02 * H, 0];
+      const bag = [w.bag * 0.25 * b + sway * 1.3, 0.5 * H, 0.04 * H * Math.sin(w.phase)];
+      cap(strapTop, 0.012, [bag[0], bag[1] + 0.06 * H, bag[2]], 0.012);
+      cap([bag[0], bag[1] + 0.035 * H, bag[2]], 0.09, [bag[0], bag[1] - 0.04 * H, bag[2]], 0.095);
     }
 
-    // Neck, head, and long hair falling to the shoulders.
-    const [nx, ny] = at(sway, shoulderU + 0.06 * H, 0);
-    shapes.lines.push([tx, ty, nx, ny, 0.11 * s]);
-    const [hx, hy] = at(sway, H - 0.065 * H, 0);
-    const headW = s * (0.076 * back + 0.095 * side);
-    shapes.ovals.push([hx, hy, headW, 0.068 * H * s]);
+    // Neck, head, and long hair that swings a beat behind the head.
+    cap([sway * 0.5, shoulderU + 0.02 * H, lean * 0.9], 0.055, [sway * 0.5, 0.885 * H, lean], 0.05);
+    const [hx, hy] = at(sway * 0.5, 0.935 * H, lean);
+    const headW = s * (0.074 * back + 0.09 * side);
     if (w.hair) {
-      const [lx, ly] = at(sway, 0.78 * H, -0.03 * H);
-      shapes.lines.push([hx, hy, lx, ly, headW * 2.15]);
+      const swing = 0.03 * H * Math.sin(w.phase - 0.8);
+      shapes.push({ cap: [hx, hy, headW * 1.08, ...at(sway * 0.5 + swing, 0.77 * H, lean - 0.03 * H), headW * 0.9] });
     }
+    shapes.push({ oval: [hx, hy, headW, 0.068 * H * s] });
     return shapes;
   }
 
-  // One pass of a posed figure: the rim pass draws everything a little fatter in door light,
-  // the black pass draws it again on top, so only a thin lit edge survives.
+  // A tapered capsule: circles at both ends joined by their outer tangents, added as its own subpath.
+  function capsule(g, x1, y1, r1, x2, y2, r2) {
+    const d = Math.hypot(x2 - x1, y2 - y1);
+    if (d <= Math.abs(r1 - r2) + 0.01) {
+      const [cx0, cy0, r] = r1 > r2 ? [x1, y1, r1] : [x2, y2, r2];
+      g.moveTo(cx0 + r, cy0);
+      g.arc(cx0, cy0, r, 0, Math.PI * 2);
+      return;
+    }
+    const t = Math.atan2(y2 - y1, x2 - x1);
+    const p = Math.acos(Math.max(-1, Math.min(1, (r1 - r2) / d)));
+    g.moveTo(x1 + r1 * Math.cos(t + p), y1 + r1 * Math.sin(t + p));
+    g.arc(x1, y1, r1, t + p, t + Math.PI * 2 - p);
+    g.arc(x2, y2, r2, t - p, t + p);
+    g.closePath();
+  }
+
+  // A smooth closed curve through the midpoints of a polygon, its corners used as control points.
+  function smooth(g, points) {
+    const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    g.moveTo(...mid(points.at(-1), points[0]));
+    points.forEach((point, i) => g.quadraticCurveTo(...point, ...mid(point, points[(i + 1) % points.length])));
+    g.closePath();
+  }
+
+  // One pass of a posed figure as a single path, filled once. Every part winds the same way, so the
+  // overlaps merge into one silhouette. The rim pass grows each part by a hair (and strokes the torso,
+  // which has no radius to grow); the black pass then covers all but a thin lit edge.
   function paint(g, shapes, grow) {
-    g.lineCap = "round";
+    g.beginPath();
+    for (const shape of shapes) {
+      if (shape.cap) {
+        const [x1, y1, r1, x2, y2, r2] = shape.cap;
+        capsule(g, x1, y1, r1 + grow, x2, y2, r2 + grow);
+      } else if (shape.oval) {
+        const [x, y, rx, ry] = shape.oval;
+        g.moveTo(x + rx + grow, y);
+        g.ellipse(x, y, rx + grow, ry + grow, 0, 0, Math.PI * 2);
+      } else smooth(g, shape.outline);
+    }
+    g.fill();
+    if (!grow) return;
     g.lineJoin = "round";
-    for (const [x1, y1, x2, y2, width] of shapes.lines) {
-      g.lineWidth = width + grow * 2;
-      g.beginPath();
-      g.moveTo(x1, y1);
-      g.lineTo(x2, y2);
-      g.stroke();
-    }
-    g.lineWidth = grow * 2 + 0.5;
-    for (const [tx, ty, ws, bx, by, wh, drop] of shapes.torsos) {
-      const len = by - ty;
-      const wx = tx + (bx - tx) * 0.6;
-      const wy = ty + len * 0.6;
-      const ww = Math.min(ws, wh) * 0.86;
-      g.beginPath();
-      g.moveTo(tx - ws * 0.16, ty - drop);
-      g.quadraticCurveTo(tx - ws * 0.47, ty - drop * 0.6, tx - ws * 0.5, ty + len * 0.12);
-      g.quadraticCurveTo(wx - ww * 0.53, wy - len * 0.2, wx - ww / 2, wy);
-      g.quadraticCurveTo(bx - wh * 0.5, by - len * 0.12, bx - wh / 2, by);
-      g.lineTo(bx + wh / 2, by);
-      g.quadraticCurveTo(bx + wh * 0.5, by - len * 0.12, wx + ww / 2, wy);
-      g.quadraticCurveTo(wx + ww * 0.53, wy - len * 0.2, tx + ws * 0.5, ty + len * 0.12);
-      g.quadraticCurveTo(tx + ws * 0.47, ty - drop * 0.6, tx + ws * 0.16, ty - drop);
-      g.closePath();
-      g.fill();
-      g.stroke();
-    }
-    for (const [x1, y1, w1, x2, y2, w2] of shapes.quads) {
-      g.beginPath();
-      g.moveTo(x1 - w1 / 2, y1);
-      g.lineTo(x1 + w1 / 2, y1);
-      g.lineTo(x2 + w2 / 2, y2);
-      g.lineTo(x2 - w2 / 2, y2);
-      g.closePath();
-      g.fill();
-      g.stroke();
-    }
-    for (const [x, y, w, h] of shapes.boxes) {
-      g.beginPath();
-      g.roundRect(x - w / 2, y - h / 2, w, h, Math.min(w, h) * 0.3);
-      g.fill();
-      g.stroke();
-    }
-    for (const [x, y, rx, ry] of shapes.ovals) {
-      g.beginPath();
-      g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-      g.fill();
-      g.stroke();
-    }
+    g.lineWidth = grow * 2;
+    g.beginPath();
+    for (const shape of shapes) if (shape.outline) smooth(g, shape.outline);
+    g.stroke();
   }
 
   function figure(g, w, x, feet, s, h, lit, through) {
