@@ -21,7 +21,8 @@ jobs:
   refresh:
     if: vars.DEMO_SITE_ID != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The backfill replays every hour against Atlas from GitHub's runners, which takes minutes.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: ml
@@ -40,5 +41,6 @@ jobs:
           cache-dependency-path: ml/requirements.txt
       - run: python -m pip install -r requirements.txt
       - run: python -m footfall_ml.seed_demo --site "$SITE" --days 28 --ahead-days 3 --reset
-      - run: python -m footfall_ml.score --site "$SITE" --backfill-days 21
+      # 12 days covers every planted event (the oldest is 11 days back) and the 7-day forecast band.
+      - run: python -m footfall_ml.score --site "$SITE" --backfill-days 12
       - run: python -m footfall_ml.insights --site "$SITE"

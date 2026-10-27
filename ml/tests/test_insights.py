@@ -202,7 +202,7 @@ def test_every_demo_refresh_tells_the_same_story(start):
     traffic = demo_traffic(28, pd.Timestamp(start), ahead_days=3)
     events = [event | {"_id": ObjectId(f"{n:024x}")} for n, event in enumerate(demo_events(site, traffic))]
     repository = InsightsRepository((site, traffic, events))
-    score(repository, traffic.frame.index[28 * 24 - 1] + pd.Timedelta(hours=1, minutes=7), backfill_days=21, model_name="seasonal_profile")
+    score(repository, traffic.frame.index[28 * 24 - 1] + pd.Timedelta(hours=1, minutes=7), backfill_days=12, model_name="seasonal_profile")
     alerts = list(repository.alerts.values())
     within = lambda window: [alert for alert in alerts if window.start <= pd.Timestamp(alert["hour"]) < window.end]
     spikes = [window for window in traffic.windows if window.kind == "spike"]
@@ -211,4 +211,5 @@ def test_every_demo_refresh_tells_the_same_story(start):
         assert flagged and all(alert["drivers"][0]["value"] == source for alert in flagged)
     outage = next(window for window in traffic.windows if window.kind == "drop")
     assert len(within(outage)) == 3 and all(alert["broad"] for alert in within(outage))
-    assert sum(not any(window.start <= pd.Timestamp(alert["hour"]) < window.end for window in traffic.windows) for alert in alerts) <= 2
+    # Nothing else is flagged: the 12-day backfill the nightly job runs starts after the noisiest early weeks.
+    assert not [alert for alert in alerts if not any(window.start <= pd.Timestamp(alert["hour"]) < window.end for window in traffic.windows)]
