@@ -144,6 +144,8 @@ try {
   assert.equal(res.body.series.reduce((sum, point) => sum + point.pageviews, 0), 3);
   assert.deepEqual(res.body.events, [{ name: "paid", count: 1, visitors: 1 }]);
   assert.equal(res.body.devices.find((d) => d.device === "mobile").visitors, 1);
+  // The Google visitor's second page has no referrer, but the visit still counts toward Google.
+  assert.deepEqual(res.body.referrers, [{ referrer: "google.com", visitors: 1, pageviews: 2 }, { referrer: null, visitors: 1, pageviews: 1 }]);
   assert.equal((await call("GET", `/api/sites/${siteId}/stats?from=2026-01-02&to=2026-01-01`, { cookie: asha })).status, 400);
   assert.equal((await call("GET", `/api/sites/${siteId}/stats`, { cookie: eve })).status, 404);
   res = await call("GET", "/api/sites", { cookie: asha });

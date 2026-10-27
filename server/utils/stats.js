@@ -3,6 +3,18 @@ import { bucketStarts } from "./timeBuckets.js";
 
 const TOP = 10;
 
+// A visitor counts toward the source they arrived from. Only the first page view of a visit carries
+// the outside referrer, so filing each page view on its own put the rest of every visit under "direct".
+const sources = [
+  { $match: { name: "pageview" } },
+  { $sort: { ts: 1 } },
+  { $group: { _id: "$visitor", entry: { $first: "$referrer" }, seen: { $max: "$referrer" }, pageviews: { $sum: 1 } } },
+  { $group: { _id: { $ifNull: ["$entry", "$seen"] }, visitors: { $sum: 1 }, pageviews: { $sum: "$pageviews" } } },
+  { $project: { _id: 0, referrer: { $ifNull: ["$_id", null] }, visitors: 1, pageviews: 1 } },
+  { $sort: { visitors: -1, pageviews: -1 } },
+  { $limit: TOP },
+];
+
 // Visitors in a group = distinct visitor hashes in it.
 const breakdown = (field, label = field) => [
   { $match: { name: "pageview" } },
@@ -54,7 +66,7 @@ export const siteStats = async (site, { from, to, unit }) => {
           { $project: { pageviews: 1, visitors: { $size: "$visitors" } } },
         ],
         pages: breakdown("path", "path"),
-        referrers: breakdown("referrer", "referrer"),
+        referrers: sources,
         devices: breakdown("device", "device"),
         browsers: breakdown("browser", "browser"),
         countries: breakdown("country", "country"),
