@@ -120,6 +120,20 @@ try {
   assert.equal(stored[3].utmSource, "linkedin");
   assert.equal(stored[0].visitor, stored[1].visitor, "same browser, same day, same visitor");
   assert.notEqual(stored[0].visitor, stored[3].visitor);
+  // In production each request can reach us through a different Cloudflare edge; the person is the same.
+  const firefox = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0";
+  const viaEdge = (edge) =>
+    fetch(`${BASE}/e`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", Origin: "https://shop.example.com", "User-Agent": firefox, "X-Forwarded-For": `203.0.113.9, ${edge}` },
+      body: JSON.stringify({ d: "shop.example.com", n: "pageview", u: home, r: null }),
+    }).then((res) => res.status);
+  assert.equal(await viaEdge("172.70.1.1"), 202);
+  assert.equal(await viaEdge("162.158.2.2"), 202);
+  const throughEdges = await Event.find({ browser: "Firefox" }).lean();
+  assert.equal(throughEdges.length, 2);
+  assert.equal(throughEdges[0].visitor, throughEdges[1].visitor, "two Cloudflare edges, one visitor");
+  await Event.deleteMany({ browser: "Firefox" });
   assert.ok(!JSON.stringify(stored).includes("127.0.0.1") && !JSON.stringify(stored).includes("::1"), "IPs are never stored");
 
   // Stats

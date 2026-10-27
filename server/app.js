@@ -18,8 +18,10 @@ app.disable("x-powered-by");
 
 export const allowedOrigins = process.env.CLIENT_URL.split(",").map((origin) => origin.trim());
 
-// Render sits one proxy hop in front of us; without this req.ip is the proxy.
-app.set("trust proxy", 1);
+// On Render, onrender.com traffic passes Cloudflare and then Render's own proxy, and each appends to
+// X-Forwarded-For. Trusting one hop made req.ip a Cloudflare edge, which changes per request, so one
+// person's page views turned into many visitors and per-IP rate limits split across buckets.
+app.set("trust proxy", 2);
 
 // Keyed by email when there is one: behind the Vercel rewrite, many people share one IP.
 const authLimiter = rateLimit({
