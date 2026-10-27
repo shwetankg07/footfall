@@ -3,6 +3,7 @@
 Footfall is web analytics for small websites, run as a freemium SaaS. You add one line to your site, and the dashboard shows who visits, which pages they read, where they came from and where they give up, free and without cookies. Footfall Pro adds Intelligence: models that learn each site's normal traffic, alert you when it breaks, explain what caused it, find which visitors convert better, and rank what's worth fixing.
 
 - App: https://footfall-sigma.vercel.app
+- Demo video: https://drive.google.com/file/d/1JKWRQZw6Ig3v65L8_VbQopFHo6JqgnYO/view?usp=sharing
 - Live demo, no login: https://footfall-sigma.vercel.app/share/cRYdX41uOw17y8mhwVMHL8em
 - Demo login (Pro, with a seeded shop): `demo@example.com` / `footfall-demo`
 - API: https://footfall-api-zhmw.onrender.com/health
