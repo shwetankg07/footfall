@@ -4,7 +4,8 @@ services:
   - type: web
     name: footfall-api
     runtime: node
-    plan: free
+    # Starter, not free: free instances sleep after 15 idle minutes and drop page views while waking.
+    plan: starter
     # Closest Render region to India.
     region: singapore
     rootDir: server

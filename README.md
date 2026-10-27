@@ -12,7 +12,7 @@ The demo shop holds 28 days of generated traffic, clearly a demo: two source-dri
 
 To try a payment, open Plan and billing and pay in Razorpay test mode. Use card `4100 2800 0000 1007` with any future date and any CVV, or choose Netbanking, any bank, then Success. No real money moves.
 
-The API runs on Render's free tier, which sleeps after 15 idle minutes. A cron-job.org ping hits `/health` every 5 minutes so it stays awake.
+The API runs on a Render Starter instance, so it never sleeps and answers right away.
 
 ## Problem
 
@@ -64,7 +64,7 @@ These are the workflows, each working end to end:
 | Landing page | Canvas 2D scene, GSAP (ScrollTrigger, SplitText, DrawSVG) | One drawn scene shows the idea, people walking in and being counted; GSAP times the intro and the scroll |
 | Payments | Razorpay (test mode) | Checkout in the browser, signature check on the server |
 | ML | Python 3.12, pandas, statsmodels, scipy, scikit-learn | The usual tools for time series and evaluation |
-| Hosting | Vercel (dashboard), Render (API), Atlas (database), GitHub Actions (ML job), cron-job.org (keep-awake ping) | All free tiers |
+| Hosting | Vercel (dashboard), Render (API), Atlas (database), GitHub Actions (ML job) | Render Starter ($7 a month) so the API never sleeps; everything else is on free tiers |
 
 ## Architecture
 
@@ -217,7 +217,7 @@ export MONGO_URI=mongodb://127.0.0.1:27017 MONGO_DB=footfall API_URL=http://loca
 - **Dashboard on Vercel.** Root directory `client`, with `VITE_API_URL` set to the Render address. `client/vercel.json` rewrites `/api/*` to the Render API (so cookies stay first-party) and every other path to `index.html`.
 - **Database on MongoDB Atlas.** Free M0 cluster. Network access must allow Render and GitHub Actions (both use changing IPs).
 - **ML job on GitHub Actions.** `.github/workflows/ml-score.yml` runs at :35 every hour, just after an IST hour closes, and needs the secrets and variables listed above. GitHub runs scheduled workflows on a best-effort basis, so under load a run can be late or skipped; the next one catches up.
-- **Keep-awake ping on cron-job.org.** A free job sends `GET /health` every 5 minutes so Render's free tier never sleeps and page views aren't lost while it wakes up. GitHub's scheduler was too irregular for this, so it moved off Actions.
+- **Uptime ping on cron-job.org.** A free job sends `GET /health` every 5 minutes. On Render's free tier this is what keeps the API awake (it sleeps after 15 idle minutes, and page views sent while it wakes are lost); on Starter it only checks the API is up. GitHub's scheduler was too irregular for this, so it moved off Actions.
 
 ## API
 
